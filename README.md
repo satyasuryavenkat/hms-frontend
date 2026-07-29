@@ -1,70 +1,37 @@
-# Getting Started with Create React App
+# HMS Frontend
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+Create React App frontend for the Hospital Management System.
 
-## Available Scripts
+## Local development
 
-In the project directory, you can run:
+Requirements: Node.js 20 or newer and the HMS backend on port `8080`.
 
-### `npm start`
+```powershell
+npm ci
+npm start
+```
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+Requests to `/api` are proxied to `http://localhost:8080`. Copy `.env.example` to
+`.env.local` only if you need to override the API URL.
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+## Deploy to Vercel
 
-### `npm test`
+1. Push this directory to its own GitHub repository.
+2. In Vercel, choose **Add New > Project** and import that repository.
+3. Vercel detects Create React App. The committed `vercel.json` explicitly sets:
+   - Build command: `npm run build`
+   - Output directory: `build`
+4. If the Render backend already exists, add this Production environment variable:
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+   ```text
+   REACT_APP_API_BASE_URL=https://YOUR-BACKEND.onrender.com/api/v1
+   ```
 
-### `npm run build`
+5. Deploy. Copy the final `https://YOUR-FRONTEND.vercel.app` origin into the
+   backend's `CORS_ORIGINS` variable in Render, without a trailing slash.
+6. If this was the first service deployed, create the Render backend next, then
+   return to Vercel, add `REACT_APP_API_BASE_URL`, and redeploy. This two-pass
+   sequence resolves the fact that each service needs the other's final URL.
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
-
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
-
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
-
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
-
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+`REACT_APP_*` variables are compiled into the browser bundle. They must never
+contain database passwords, JWT secrets, or other server-side credentials.
