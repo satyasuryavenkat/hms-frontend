@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '../components/Icon';
 import { HospitalLogo } from '../components/HospitalLogo';
+import { HospitalPrintHeader } from '../components/HospitalPrintHeader';
 import { FormField, SectionTitle, Status } from '../components/ui/FormField';
 import { doctorApi, ipdApi } from '../api/services';
 import { usePatientSearch } from '../hooks/usePatientSearch';
@@ -131,11 +132,40 @@ function IPDRegistration({ onCreated, setParentMessage }) {
   const [query, setQuery] = useState('');
   const [doctors, setDoctors] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [validationMessage, setValidationMessage] = useState('');
   const { patients, loading, error } = usePatientSearch(query);
   useEffect(() => { doctorApi.list(true).then(data => { setDoctors(data); if (data.length) setForm(current => ({ ...current, consultantId: String(data[0].id) })); }).catch(requestError => setParentMessage({ type: 'error', text: requestError.message })); }, [setParentMessage]);
-  const update = (field, value) => setForm(current => ({ ...current, [field]: value }));
+  const update = (field, value) => {
+    setForm(current => ({ ...current, [field]: value }));
+    setFieldErrors(current => ({ ...current, [field]: '' }));
+    setValidationMessage('');
+  };
   const choosePatient = item => { setPatient(item); update('patientId', item.id); setQuery(''); };
+  const validate = () => {
+    const mobile = form.attendantMobile.replace(/\D/g, '');
+    const errors = {};
+    if (!form.patientId) errors.patientId = 'Search and select a registered patient.';
+    if (!form.admissionDate) errors.admissionDate = 'Select the admission date.';
+    if (!form.admissionTime) errors.admissionTime = 'Select the admission time.';
+    if (!form.consultantId) errors.consultantId = 'Select a consulting doctor.';
+    if (!form.ward.trim()) errors.ward = 'Select a ward.';
+    if (!form.bedNumber.trim()) errors.bedNumber = 'Enter the assigned bed number.';
+    if (!form.provisionalDiagnosis.trim()) errors.provisionalDiagnosis = 'Enter the provisional diagnosis.';
+    if (!form.attendantName.trim()) errors.attendantName = 'Enter the attendant name.';
+    if (!mobile) errors.attendantMobile = 'Enter the attendant mobile number.';
+    else if (!/^\d{10,15}$/.test(mobile)) errors.attendantMobile = 'Enter 10 to 15 digits only, without spaces or country-code symbols.';
+    setFieldErrors(errors);
+    const firstField = Object.keys(errors)[0];
+    if (firstField) {
+      setValidationMessage(`Please correct ${Object.keys(errors).length} highlighted field${Object.keys(errors).length === 1 ? '' : 's'} before admission.`);
+      window.setTimeout(() => document.getElementById(`ipd-${firstField}`)?.focus(), 0);
+      return false;
+    }
+    return true;
+  };
   const submit = async () => {
+    if (!validate()) return;
     setBusy(true);
     try {
       const created = await ipdApi.createAdmission({ patientId: Number(form.patientId), admissionType: form.admissionType, admissionDate: form.admissionDate, admissionTime: form.admissionTime, consultantId: Number(form.consultantId), ward: form.ward, bedNumber: form.bedNumber, provisionalDiagnosis: form.provisionalDiagnosis, attendant: { name: form.attendantName, mobile: form.attendantMobile.replace(/\D/g, '') } });
@@ -144,18 +174,62 @@ function IPDRegistration({ onCreated, setParentMessage }) {
     } catch (requestError) { setParentMessage({ type: 'error', text: requestError.message }); }
     finally { setBusy(false); }
   };
-  const valid = form.patientId && form.consultantId && form.bedNumber && form.provisionalDiagnosis && form.attendantName && form.attendantMobile;
-  return <section className="card form-card ipd-registration"><SectionTitle step="01" title="Patient admission" description="Register a patient for inpatient care"/><div className="patient-lookup"><Icon name="search"/><input aria-label="Find patient for IPD registration" value={query} onChange={event => setQuery(event.target.value)} placeholder={patient ? `${patient.name} · ${patient.uhid}` : 'Find registered patient...'}/>{query && <div className="patient-results">{loading ? <p>Searching…</p> : error ? <p>{error}</p> : patients.map(item => <button key={item.id} onClick={() => choosePatient(item)}><span><b>{item.name}</b><small>{item.uhid} · {item.mobile}</small></span></button>)}</div>}</div><p className="lookup-hint">Patients must be registered before IPD admission.</p><div className="form-grid"><FormField label="Selected patient" required><input value={patient?.name || ''} readOnly/></FormField><FormField label="Admission type" required><select value={form.admissionType} onChange={event => update('admissionType', event.target.value)}><option>PLANNED</option><option>EMERGENCY</option><option>TRANSFER</option></select></FormField><FormField label="Admission date" required><input type="date" value={form.admissionDate} onChange={event => update('admissionDate', event.target.value)}/></FormField><FormField label="Admission time" required><input type="time" value={form.admissionTime} onChange={event => update('admissionTime', event.target.value)}/></FormField><FormField label="Consulting doctor" required wide><select value={form.consultantId} onChange={event => update('consultantId', event.target.value)}>{doctors.map(doctor => <option key={doctor.id} value={doctor.id}>{doctor.name} — {doctor.department}</option>)}</select></FormField><FormField label="Ward" required><select value={form.ward} onChange={event => update('ward', event.target.value)}><option>General</option><option>Private</option><option>Deluxe</option><option>ICU</option></select></FormField><FormField label="Bed number" required><input value={form.bedNumber} onChange={event => update('bedNumber', event.target.value)}/></FormField><FormField label="Provisional diagnosis" required wide><textarea rows="3" value={form.provisionalDiagnosis} onChange={event => update('provisionalDiagnosis', event.target.value)}/></FormField><FormField label="Attendant name" required><input value={form.attendantName} onChange={event => update('attendantName', event.target.value)}/></FormField><FormField label="Attendant mobile" required><input value={form.attendantMobile} onChange={event => update('attendantMobile', event.target.value)}/></FormField></div><div className="form-actions"><button className="primary" disabled={!valid || busy} onClick={submit}><Icon name="bed"/> {busy ? 'Admitting…' : 'Complete admission'}</button></div></section>;
+  const inputState = field => ({ id: `ipd-${field}`, className: fieldErrors[field] ? 'invalid' : '', 'aria-invalid': Boolean(fieldErrors[field]), 'aria-describedby': fieldErrors[field] ? `ipd-${field}-error` : undefined });
+  const errorFor = field => fieldErrors[field] && <small id={`ipd-${field}-error`} className="field-error">{fieldErrors[field]}</small>;
+  return <section className="card form-card ipd-registration">
+    <SectionTitle step="01" title="Patient admission" description="Register a patient for inpatient care"/>
+    <div className={`patient-lookup ${fieldErrors.patientId ? 'invalid' : ''}`}><Icon name="search"/><input aria-label="Find patient for IPD registration" value={query} onChange={event => { setQuery(event.target.value); setFieldErrors(current => ({ ...current, patientId: '' })); }} placeholder={patient ? `${patient.name} · ${patient.uhid}` : 'Find registered patient...'}/>{query && <div className="patient-results">{loading ? <p>Searching…</p> : error ? <p>{error}</p> : patients.map(item => <button type="button" key={item.id} onClick={() => choosePatient(item)}><span><b>{item.name}</b><small>{item.uhid} · {item.mobile}</small></span></button>)}</div>}</div>
+    <p className="lookup-hint">Patients must be registered before IPD admission.</p>
+    <div className="form-grid">
+      <FormField label="Selected patient" required><input {...inputState('patientId')} value={patient?.name || ''} readOnly/>{errorFor('patientId')}</FormField>
+      <FormField label="Admission type" required><select value={form.admissionType} onChange={event => update('admissionType', event.target.value)}><option>PLANNED</option><option>EMERGENCY</option><option>TRANSFER</option></select></FormField>
+      <FormField label="Admission date" required><input {...inputState('admissionDate')} type="date" value={form.admissionDate} onChange={event => update('admissionDate', event.target.value)}/>{errorFor('admissionDate')}</FormField>
+      <FormField label="Admission time" required><input {...inputState('admissionTime')} type="time" value={form.admissionTime} onChange={event => update('admissionTime', event.target.value)}/>{errorFor('admissionTime')}</FormField>
+      <FormField label="Consulting doctor" required wide><select {...inputState('consultantId')} value={form.consultantId} onChange={event => update('consultantId', event.target.value)}><option value="">Select doctor</option>{doctors.map(doctor => <option key={doctor.id} value={doctor.id}>{doctor.name} — {doctor.department}</option>)}</select>{errorFor('consultantId')}</FormField>
+      <FormField label="Ward" required><select {...inputState('ward')} value={form.ward} onChange={event => update('ward', event.target.value)}><option>General</option><option>Private</option><option>Deluxe</option><option>ICU</option></select>{errorFor('ward')}</FormField>
+      <FormField label="Bed number" required><input {...inputState('bedNumber')} value={form.bedNumber} onChange={event => update('bedNumber', event.target.value)}/>{errorFor('bedNumber')}</FormField>
+      <FormField label="Provisional diagnosis" required wide><textarea {...inputState('provisionalDiagnosis')} rows="3" value={form.provisionalDiagnosis} onChange={event => update('provisionalDiagnosis', event.target.value)}/>{errorFor('provisionalDiagnosis')}</FormField>
+      <FormField label="Attendant name" required><input {...inputState('attendantName')} value={form.attendantName} onChange={event => update('attendantName', event.target.value)}/>{errorFor('attendantName')}</FormField>
+      <FormField label="Attendant mobile" required hint="Enter 10 to 15 digits"><input {...inputState('attendantMobile')} inputMode="numeric" autoComplete="tel" value={form.attendantMobile} onChange={event => update('attendantMobile', event.target.value)} placeholder="Example: 9876543210"/>{errorFor('attendantMobile')}</FormField>
+    </div>
+    {validationMessage && <div className="validation-summary" role="alert"><Icon name="info" size={16}/>{validationMessage}</div>}
+    <div className="form-actions"><button className="primary" disabled={busy} onClick={submit}><Icon name="bed"/> {busy ? 'Admitting…' : 'Complete admission'}</button></div>
+  </section>;
 }
 
 function AddChargeDialog({ catalog, onClose, onAdd, busy }) {
   const firstCategory = catalog[0];
   const firstService = firstCategory?.services?.[0];
   const [charge, setCharge] = useState({ category: firstCategory?.category || 'OTHER', department: firstService?.department || 'Inpatient Services', serviceCode: firstService?.code || null, description: firstService?.name || '', quantity: 1, rate: firstService?.defaultRate || '' });
+  const [fieldErrors, setFieldErrors] = useState({});
   const changeCategory = category => { const item = catalog.find(entry => entry.category === category); const service = item?.services?.[0]; setCharge(current => ({ ...current, category, department: service?.department || '', serviceCode: service?.code || null, description: service?.name || '', rate: service?.defaultRate || '' })); };
   const services = catalog.find(item => item.category === charge.category)?.services || [];
   const changeService = code => { const service = services.find(item => item.code === code); if (service) setCharge(current => ({ ...current, serviceCode: service.code, description: service.name, department: service.department, rate: service.defaultRate })); };
-  return <div className="dialog-backdrop"><div className="charge-dialog" role="dialog" aria-modal="true" aria-labelledby="add-charge-title"><div className="dialog-header"><div><h2 id="add-charge-title">Add billing charge</h2><p>Charges are saved to the selected IPD admission</p></div><button onClick={onClose}>×</button></div><div className="dialog-body"><div className="form-grid"><FormField label="Category" required><select value={charge.category} onChange={event => changeCategory(event.target.value)}>{catalog.map(item => <option key={item.category} value={item.category}>{item.label}</option>)}</select></FormField><FormField label="Service"><select value={charge.serviceCode || ''} onChange={event => changeService(event.target.value)}><option value="">Custom service</option>{services.map(service => <option key={service.code} value={service.code}>{service.name}</option>)}</select></FormField><FormField label="Department" required><input value={charge.department} onChange={event => setCharge(current => ({ ...current, department: event.target.value }))}/></FormField><FormField label="Description" required><input value={charge.description} onChange={event => setCharge(current => ({ ...current, description: event.target.value }))}/></FormField><FormField label="Quantity" required><input type="number" min="0.01" value={charge.quantity} onChange={event => setCharge(current => ({ ...current, quantity: event.target.value }))}/></FormField><FormField label="Rate" required><input type="number" min="0" value={charge.rate} onChange={event => setCharge(current => ({ ...current, rate: event.target.value }))}/></FormField></div></div><div className="dialog-actions"><button className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={busy || !charge.description || !charge.department || !Number(charge.quantity)} onClick={() => onAdd({ ...charge, quantity: Number(charge.quantity), rate: Number(charge.rate) })}>Add to bill</button></div></div></div>;
+  const update = (field, value) => { setCharge(current => ({ ...current, [field]: value })); setFieldErrors(current => ({ ...current, [field]: '' })); };
+  const submit = () => {
+    const errors = {};
+    if (!charge.department.trim()) errors.department = 'Enter the billing department.';
+    if (!charge.description.trim()) errors.description = 'Enter the charge description.';
+    if (!(Number(charge.quantity) > 0)) errors.quantity = 'Quantity must be greater than zero.';
+    if (Number(charge.rate) < 0 || charge.rate === '') errors.rate = 'Rate must be zero or greater.';
+    setFieldErrors(errors);
+    const firstField = Object.keys(errors)[0];
+    if (firstField) { window.setTimeout(() => document.getElementById(`charge-${firstField}`)?.focus(), 0); return; }
+    onAdd({ ...charge, quantity: Number(charge.quantity), rate: Number(charge.rate) });
+  };
+  const errorFor = field => fieldErrors[field] && <small className="field-error">{fieldErrors[field]}</small>;
+  return <div className="dialog-backdrop"><div className="charge-dialog" role="dialog" aria-modal="true" aria-labelledby="add-charge-title">
+    <div className="dialog-header"><div><h2 id="add-charge-title">Add billing charge</h2><p>Charges are saved to the selected IPD admission</p></div><button onClick={onClose}>×</button></div>
+    <div className="dialog-body"><div className="form-grid">
+      <FormField label="Category" required><select value={charge.category} onChange={event => changeCategory(event.target.value)}>{catalog.map(item => <option key={item.category} value={item.category}>{item.label}</option>)}</select></FormField>
+      <FormField label="Service"><select value={charge.serviceCode || ''} onChange={event => changeService(event.target.value)}><option value="">Custom service</option>{services.map(service => <option key={service.code} value={service.code}>{service.name}</option>)}</select></FormField>
+      <FormField label="Department" required><input id="charge-department" className={fieldErrors.department ? 'invalid' : ''} value={charge.department} onChange={event => update('department', event.target.value)}/>{errorFor('department')}</FormField>
+      <FormField label="Description" required><input id="charge-description" className={fieldErrors.description ? 'invalid' : ''} value={charge.description} onChange={event => update('description', event.target.value)}/>{errorFor('description')}</FormField>
+      <FormField label="Quantity" required><input id="charge-quantity" className={fieldErrors.quantity ? 'invalid' : ''} type="number" min="0.01" value={charge.quantity} onChange={event => update('quantity', event.target.value)}/>{errorFor('quantity')}</FormField>
+      <FormField label="Rate" required><input id="charge-rate" className={fieldErrors.rate ? 'invalid' : ''} type="number" min="0" value={charge.rate} onChange={event => update('rate', event.target.value)}/>{errorFor('rate')}</FormField>
+    </div></div>
+    <div className="dialog-actions"><button className="secondary" onClick={onClose}>Cancel</button><button className="primary" disabled={busy} onClick={submit}>Add to bill</button></div>
+  </div></div>;
 }
 
 function PatientBanner({ admission }) { return <div className="patient-banner card"><div className="avatar patient-photo">{admission.patient.name.split(' ').map(word => word[0]).slice(0, 2).join('')}</div><div className="patient-primary"><span>IPD PATIENT</span><h2>{admission.patient.name} <Status>{admission.status}</Status></h2><p>{admission.patient.uhid} · {admission.patient.gender} · <b>{admission.ipdNumber}</b></p></div><div className="patient-stat"><small>Ward / Bed</small><strong>{admission.ward} · {admission.bedNumber}</strong></div><div className="patient-stat"><small>Consultant</small><strong>{admission.consultant.name}</strong></div></div>; }
@@ -164,15 +238,42 @@ function DischargeSummary({ admission, currentUser, onChangePatient, onPrint }) 
   const [form, setForm] = useState({ dischargeDateTime: `${currentDate()}T16:00:00+05:30`, dischargeType: 'ROUTINE', finalDiagnosis: admission.provisionalDiagnosis || '', clinicalSummary: '', advice: '', followUpDate: '', followUpDoctorId: admission.consultant.id });
   const [message, setMessage] = useState({ type: '', text: '' });
   const [busy, setBusy] = useState(false);
-  const update = (field, value) => setForm(current => ({ ...current, [field]: value }));
-  const save = async finalize => { setBusy(true); try { await ipdApi.saveDischarge(admission.id, { ...form, followUpDate: form.followUpDate || null, medications: [] }); if (finalize) await ipdApi.finalizeDischarge(admission.id, currentUser.id); setMessage({ type: 'success', text: finalize ? 'Patient discharged successfully.' : 'Discharge draft saved.' }); } catch (error) { setMessage({ type: 'error', text: error.message }); } finally { setBusy(false); } };
-  return <section className="card form-card discharge"><div className="selected-toolbar"><button onClick={onChangePatient}><Icon name="search"/> Select another admission</button></div><SectionTitle step="02" title="Discharge summary" description={`Complete the clinical summary for ${admission.patient.name}`}/><div className="form-grid"><FormField label="Discharge type" required><select value={form.dischargeType} onChange={event => update('dischargeType', event.target.value)}><option>ROUTINE</option><option>LAMA</option><option>TRANSFER</option><option>DEATH</option></select></FormField><FormField label="Follow-up date"><input type="date" value={form.followUpDate} onChange={event => update('followUpDate', event.target.value)}/></FormField><FormField label="Final diagnosis" required wide><textarea rows="2" value={form.finalDiagnosis} onChange={event => update('finalDiagnosis', event.target.value)}/></FormField><FormField label="Clinical summary" required wide><textarea rows="5" value={form.clinicalSummary} onChange={event => update('clinicalSummary', event.target.value)}/></FormField><FormField label="Advice & follow-up" wide><textarea rows="4" value={form.advice} onChange={event => update('advice', event.target.value)}/></FormField></div>{message.text && <div className={`api-message ${message.type}`}>{message.text}</div>}<div className="form-actions"><button className="secondary" disabled={busy} onClick={() => save(false)}>Save draft</button><button className="primary" disabled={busy || !form.finalDiagnosis || !form.clinicalSummary} onClick={() => save(true)}><Icon name="check"/> Finalize discharge</button><button className="secondary" disabled={!form.finalDiagnosis || !form.clinicalSummary} onClick={() => onPrint(form)}><Icon name="print"/> Print formatted discharge</button></div></section>;
+  const [fieldErrors, setFieldErrors] = useState({});
+  const update = (field, value) => { setForm(current => ({ ...current, [field]: value })); setFieldErrors(current => ({ ...current, [field]: '' })); };
+  const validate = () => {
+    const errors = {};
+    if (!form.finalDiagnosis.trim()) errors.finalDiagnosis = 'Enter the final diagnosis.';
+    if (!form.clinicalSummary.trim()) errors.clinicalSummary = 'Enter the clinical summary.';
+    setFieldErrors(errors);
+    const firstField = Object.keys(errors)[0];
+    if (firstField) {
+      setMessage({ type: 'error', text: errors[firstField] });
+      window.setTimeout(() => document.getElementById(`discharge-${firstField}`)?.focus(), 0);
+      return false;
+    }
+    return true;
+  };
+  const save = async finalize => { if (!validate()) return; setBusy(true); try { await ipdApi.saveDischarge(admission.id, { ...form, followUpDate: form.followUpDate || null, medications: [] }); if (finalize) await ipdApi.finalizeDischarge(admission.id, currentUser.id); setMessage({ type: 'success', text: finalize ? 'Patient discharged successfully.' : 'Discharge draft saved.' }); } catch (error) { setMessage({ type: 'error', text: error.message }); } finally { setBusy(false); } };
+  const print = () => { if (validate()) onPrint(form); };
+  return <section className="card form-card discharge">
+    <div className="selected-toolbar"><button onClick={onChangePatient}><Icon name="search"/> Select another admission</button></div>
+    <SectionTitle step="02" title="Discharge summary" description={`Complete the clinical summary for ${admission.patient.name}`}/>
+    <div className="form-grid">
+      <FormField label="Discharge type" required><select value={form.dischargeType} onChange={event => update('dischargeType', event.target.value)}><option>ROUTINE</option><option>LAMA</option><option>TRANSFER</option><option>DEATH</option></select></FormField>
+      <FormField label="Follow-up date"><input type="date" value={form.followUpDate} onChange={event => update('followUpDate', event.target.value)}/></FormField>
+      <FormField label="Final diagnosis" required wide><textarea id="discharge-finalDiagnosis" className={fieldErrors.finalDiagnosis ? 'invalid' : ''} rows="2" value={form.finalDiagnosis} onChange={event => update('finalDiagnosis', event.target.value)}/>{fieldErrors.finalDiagnosis && <small className="field-error">{fieldErrors.finalDiagnosis}</small>}</FormField>
+      <FormField label="Clinical summary" required wide><textarea id="discharge-clinicalSummary" className={fieldErrors.clinicalSummary ? 'invalid' : ''} rows="5" value={form.clinicalSummary} onChange={event => update('clinicalSummary', event.target.value)}/>{fieldErrors.clinicalSummary && <small className="field-error">{fieldErrors.clinicalSummary}</small>}</FormField>
+      <FormField label="Advice & follow-up" wide><textarea rows="4" value={form.advice} onChange={event => update('advice', event.target.value)}/></FormField>
+    </div>
+    {message.text && <div className={`api-message ${message.type}`}>{message.text}</div>}
+    <div className="form-actions"><button className="secondary" disabled={busy} onClick={() => save(false)}>Save draft</button><button className="primary" disabled={busy} onClick={() => save(true)}><Icon name="check"/> Finalize discharge</button><button className="secondary" onClick={print}><Icon name="print"/> Print formatted discharge</button></div>
+  </section>;
 }
 
 function IPDFinalBillPrint({ admission, bill, charges, paymentMode }) {
   const items = bill?.charges?.length ? bill.charges : charges;
   return <article className="print-receipt ipd-final-print">
-    <IPDPrintHeader desk="Inpatient Billing Department"/>
+    <HospitalPrintHeader/>
     <div className="receipt-title">IPD FINAL BILL & PAYMENT RECEIPT</div>
     <section className="receipt-details"><div><p><b>Patient:</b> {admission?.patient?.name || '—'}</p><p><b>UHID:</b> {admission?.patient?.uhid || '—'}</p><p><b>IPD No.:</b> {admission?.ipdNumber || '—'}</p><p><b>Age / Gender:</b> {admission?.patient?.age ?? '—'} / {admission?.patient?.gender || '—'}</p><p><b>Mobile:</b> {admission?.patient?.mobile ? `+91 ${admission.patient.mobile}` : '—'}</p><p><b>Ward / Bed:</b> {admission?.ward || '—'} / {admission?.bedNumber || '—'}</p></div><div><p><b>Invoice No.:</b> {bill?.invoiceNumber || 'Pending'}</p><p><b>Invoice Date:</b> {bill?.settledAt ? new Date(bill.settledAt).toLocaleString('en-IN') : new Date().toLocaleString('en-IN')}</p><p><b>Admission:</b> {admission?.admissionDateTime?.replace('T', ' ') || '—'}</p><p><b>Admission Type:</b> {admission?.admissionType || '—'}</p><p><b>Consultant:</b> {admission?.consultant?.name || '—'}</p><p><b>Payment:</b> {bill?.paymentMode || paymentMode} / {bill?.paymentStatus || 'PENDING'}</p></div></section>
     <table className="receipt-table ipd-print-table"><thead><tr><th>S.No.</th><th>Particular</th><th>Category</th><th>Qty</th><th>Rate</th><th>Amount (₹)</th></tr></thead><tbody>{items.map((charge, index) => <tr key={charge.id || index}><td>{index + 1}</td><td>{charge.description}<small>{charge.department}</small></td><td>{charge.category}</td><td>{Number(charge.quantity).toFixed(2)}</td><td>{Number(charge.rate).toFixed(2)}</td><td>{Number(charge.amount ?? Number(charge.quantity) * Number(charge.rate)).toFixed(2)}</td></tr>)}<tr className="receipt-summary-row"><td colSpan="5">Gross Charges</td><td>{Number(bill?.grossCharges || 0).toFixed(2)}</td></tr><tr className="receipt-summary-row"><td colSpan="5">Advance Received</td><td>− {Number(bill?.advanceReceived || 0).toFixed(2)}</td></tr><tr className="receipt-summary-row"><td colSpan="5">Discount</td><td>− {Number(bill?.discount || 0).toFixed(2)}</td></tr><tr className="receipt-total"><td colSpan="5">Paid Amount</td><td>₹{Number(bill?.paidAmount || 0).toFixed(2)}</td></tr><tr className="receipt-summary-row"><td colSpan="5">Balance Payable</td><td>₹{Number(bill?.balancePayable || 0).toFixed(2)}</td></tr></tbody></table>
@@ -183,7 +284,7 @@ function IPDFinalBillPrint({ admission, bill, charges, paymentMode }) {
 
 function IPDDischargePrint({ admission, form }) {
   return <article className="print-receipt ipd-discharge-print">
-    <IPDPrintHeader desk="Inpatient & Discharge Department"/>
+    <HospitalPrintHeader/>
     <div className="receipt-title">IPD DISCHARGE SUMMARY</div>
     <section className="receipt-details"><div><p><b>Patient:</b> {admission?.patient?.name || '—'}</p><p><b>UHID:</b> {admission?.patient?.uhid || '—'}</p><p><b>IPD No.:</b> {admission?.ipdNumber || '—'}</p><p><b>Age / Gender:</b> {admission?.patient?.age ?? '—'} / {admission?.patient?.gender || '—'}</p><p><b>Ward / Bed:</b> {admission?.ward || '—'} / {admission?.bedNumber || '—'}</p></div><div><p><b>Consultant:</b> {admission?.consultant?.name || '—'}</p><p><b>Admission:</b> {admission?.admissionDateTime?.replace('T', ' ') || '—'}</p><p><b>Discharge:</b> {form?.dischargeDateTime?.replace('T', ' ') || '—'}</p><p><b>Discharge Type:</b> {form?.dischargeType || '—'}</p><p><b>Follow-up Date:</b> {form?.followUpDate || 'As advised'}</p></div></section>
     <section className="discharge-print-section"><h3>Provisional diagnosis</h3><p>{admission?.provisionalDiagnosis || '—'}</p></section>
@@ -192,10 +293,6 @@ function IPDDischargePrint({ admission, form }) {
     <section className="discharge-print-section"><h3>Advice and follow-up</h3><p>{form?.advice || 'Follow treating consultant instructions.'}</p></section>
     <IPDPrintFooter text="Seek immediate medical attention if symptoms worsen." signature="Consultant Signature"/>
   </article>;
-}
-
-function IPDPrintHeader({ desk }) {
-  return <header className="receipt-hospital-header"><div className="receipt-brand"><HospitalLogo className="receipt-logo"/><div><h1><span>Lakshmi Sreenivaasa</span><span>Multi Speciality Hospital</span></h1><p>Healing · Caring · Serving</p></div></div><address><strong>{desk}</strong><br/>Generated securely by Lakshmi Sreenivaasa HMS<br/>Authorized hospital use</address></header>;
 }
 
 function IPDPrintFooter({ text, signature = 'Authorized Signature' }) {

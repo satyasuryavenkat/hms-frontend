@@ -23,6 +23,7 @@ export const doctorApi = {
   get: id => apiRequest(`/doctors/${id}`),
   create: body => apiRequest('/doctors', { method: 'POST', body }),
   update: (id, body) => apiRequest(`/doctors/${id}`, { method: 'PUT', body }),
+  delete: id => apiRequest(`/doctors/${id}`, { method: 'DELETE' }),
 };
 
 export const opApi = {
@@ -37,6 +38,8 @@ export const labApi = {
   tests: (query = '', department, active = true) => apiRequest('/lab-tests', { query: { query, department, active } }),
   createTest: body => apiRequest('/lab-tests', { method: 'POST', body }),
   updateTest: (id, body) => apiRequest(`/lab-tests/${id}`, { method: 'PUT', body }),
+  updateReportTemplate: (id, html) => apiRequest(`/lab-tests/${id}/report-template`, { method: 'PUT', body: { html } }),
+  deleteTest: id => apiRequest(`/lab-tests/${id}`, { method: 'DELETE' }),
   createOrder: body => apiRequest('/lab-orders', { method: 'POST', body }),
   orders: query => apiRequest('/lab-orders', { query }),
   getOrder: id => apiRequest(`/lab-orders/${id}`),
@@ -81,4 +84,10 @@ export const pharmacyApi = {
   deleteMedicine: id => apiRequest(`/pharmacy/medicines/${id}`, { method: 'DELETE' }),
   createSale: body => apiRequest('/pharmacy/sales', { method: 'POST', body }),
   sale: id => apiRequest(`/pharmacy/sales/${id}`),
+};
+
+export const followUpApi = {
+  create: body => apiRequest('/follow-ups', { method: 'POST', body }),
+  reminders: () => apiRequest('/follow-ups/reminders'),
+  markReminded: id => apiRequest(`/follow-ups/${id}/reminded`, { method: 'PATCH' }),
 };

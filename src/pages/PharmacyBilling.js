@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { pharmacyApi } from '../api/services';
 import { Icon } from '../components/Icon';
 import { HospitalLogo } from '../components/HospitalLogo';
+import { HospitalPrintHeader } from '../components/HospitalPrintHeader';
 import { usePatientSearch } from '../hooks/usePatientSearch';
 import { formatMoney } from '../data/hospitalData';
 
@@ -16,6 +17,7 @@ export function PharmacyBilling() {
   const [discount, setDiscount] = useState(0);
   const [paymentMode, setPaymentMode] = useState('CASH');
   const [message, setMessage] = useState({ type: '', text: '' });
+  const [fieldErrors, setFieldErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [invoice, setInvoice] = useState(null);
   const { patients } = usePatientSearch(patientQuery);
@@ -47,8 +49,18 @@ export function PharmacyBilling() {
 
   const checkout = async () => {
     const name = patient?.name || customer.name.trim();
+    const mobile = customer.mobile.replace(/\D/g, '');
+    const errors = {};
+    if (!patient && !name) errors.name = 'Enter the walk-in customer name or select a registered patient.';
+    if (!patient && mobile && !/^\d{10,15}$/.test(mobile)) errors.mobile = 'Enter 10 to 15 digits only, or leave mobile blank.';
+    setFieldErrors(errors);
     if (!cart.length) return setMessage({ type: 'error', text: 'Add at least one medicine to the bill.' });
-    if (!name) return setMessage({ type: 'error', text: 'Select a patient or enter a walk-in customer name.' });
+    const firstField = Object.keys(errors)[0];
+    if (firstField) {
+      setMessage({ type: 'error', text: errors[firstField] });
+      window.setTimeout(() => document.getElementById(`pharmacy-${firstField}`)?.focus(), 0);
+      return;
+    }
     setSubmitting(true);
     setMessage({ type: '', text: '' });
     try {
@@ -86,8 +98,8 @@ export function PharmacyBilling() {
     <aside className="card bill-card pharmacy-checkout">
       <div className="bill-header"><div><span>PHARMACY INVOICE</span><strong>#{invoice?.invoiceNumber || 'Pending'}</strong></div><HospitalLogo className="logo-mini"/></div>
       <label className="checkout-label">Patient lookup (optional)</label>
-      <div className="patient-lookup pharmacy-patient-lookup"><Icon name="search"/><input value={patientQuery} onChange={event => { setPatientQuery(event.target.value); setPatient(null); }} placeholder="Search name, UHID or mobile"/>{patientQuery && !patient && <div className="patient-results">{patients.map(item => <button type="button" key={item.id} onClick={() => { setPatient(item); setPatientQuery(item.name); }}><span><b>{item.name}</b><small>{item.uhid} · {item.mobile}</small></span></button>)}</div>}</div>
-      {!patient && <div className="walkin-fields"><input value={customer.name} onChange={event => setCustomer({ ...customer, name: event.target.value })} placeholder="Walk-in customer name"/><input value={customer.mobile} onChange={event => setCustomer({ ...customer, mobile: event.target.value })} placeholder="Mobile number (optional)"/></div>}
+      <div className="patient-lookup pharmacy-patient-lookup"><Icon name="search"/><input value={patientQuery} onChange={event => { setPatientQuery(event.target.value); setPatient(null); }} placeholder="Search name, UHID or mobile"/>{patientQuery && !patient && <div className="patient-results">{patients.map(item => <button type="button" key={item.id} onClick={() => { setPatient(item); setPatientQuery(item.name); setFieldErrors({}); }}><span><b>{item.name}</b><small>{item.uhid} · {item.mobile}</small></span></button>)}</div>}</div>
+      {!patient && <div className="walkin-fields validation-fields"><div><input id="pharmacy-name" className={fieldErrors.name ? 'invalid' : ''} aria-invalid={Boolean(fieldErrors.name)} value={customer.name} onChange={event => { setCustomer({ ...customer, name: event.target.value }); setFieldErrors(current => ({ ...current, name: '' })); }} placeholder="Walk-in customer name"/>{fieldErrors.name && <small className="field-error">{fieldErrors.name}</small>}</div><div><input id="pharmacy-mobile" className={fieldErrors.mobile ? 'invalid' : ''} aria-invalid={Boolean(fieldErrors.mobile)} inputMode="numeric" value={customer.mobile} onChange={event => { setCustomer({ ...customer, mobile: event.target.value }); setFieldErrors(current => ({ ...current, mobile: '' })); }} placeholder="Mobile number (optional)"/>{fieldErrors.mobile && <small className="field-error">{fieldErrors.mobile}</small>}</div></div>}
       {patient && <div className="selected-pharmacy-patient"><span>{patient.name.split(' ').map(part => part[0]).slice(0, 2).join('')}</span><div><b>{patient.name}</b><small>{patient.uhid} · {patient.mobile}</small></div><button onClick={() => { setPatient(null); setPatientQuery(''); }}>×</button></div>}
       <h3>Payment summary</h3>
       <div className="summary-line"><span>Subtotal</span><b>{formatMoney(invoice?.subtotal ?? subtotal)}</b></div>
@@ -105,7 +117,7 @@ export function PharmacyBilling() {
 function PharmacyReceipt({ invoice }) {
   if (!invoice) return null;
   return <article className="print-receipt pharmacy-print">
-    <header className="receipt-hospital-header"><div className="receipt-brand"><HospitalLogo className="receipt-logo"/><div><h1><span>Lakshmi Sreenivaasa</span><span>Multi Speciality Hospital</span></h1><p>Healing · Caring · Serving</p></div></div><address><strong>Hospital Pharmacy</strong><br/>Authorized medicine sale<br/>Computer-generated invoice</address></header>
+    <HospitalPrintHeader/>
     <div className="receipt-title">PHARMACY TAX INVOICE</div>
     <section className="receipt-details"><div><p><b>Invoice:</b> {invoice.invoiceNumber}</p><p><b>Customer:</b> {invoice.customerName}</p><p><b>UHID:</b> {invoice.patient?.uhid || 'Walk-in'}</p><p><b>Mobile:</b> {invoice.customerMobile || '—'}</p></div><div><p><b>Date:</b> {new Date(invoice.createdAt).toLocaleString('en-IN')}</p><p><b>Payment mode:</b> {invoice.paymentMode}</p><p><b>Payment status:</b> {invoice.paymentStatus}</p></div></section>
     <table className="receipt-table"><thead><tr><th>#</th><th>Medicine / Batch</th><th>Qty × Rate</th><th>Tax</th><th>Amount (₹)</th></tr></thead><tbody>{invoice.items.map((item, index) => <tr key={`${item.medicineId}-${index}`}><td>{index + 1}</td><td><b>{item.medicineName}</b><small>{item.manufacturerCode} · Batch {item.batchNumber || '—'} · Exp {item.expiryDate}</small></td><td>{item.quantity} × {Number(item.unitPrice).toFixed(2)}</td><td>{Number(item.taxAmount).toFixed(2)}</td><td>{Number(item.lineTotal).toFixed(2)}</td></tr>)}<tr><td colSpan="4">Discount</td><td>− {Number(invoice.discount).toFixed(2)}</td></tr><tr className="receipt-total"><td colSpan="4">Paid Amount</td><td>₹{Number(invoice.paidAmount).toFixed(2)}</td></tr></tbody></table>

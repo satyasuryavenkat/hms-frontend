@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import './App.css';
 import { AppShell } from './components/layout/AppShell';
 import { OPBilling } from './pages/OPBilling';
@@ -7,7 +7,8 @@ import { IPDBilling } from './pages/IPDBilling';
 import { LoginPage } from './pages/LoginPage';
 import { AdminConfiguration } from './pages/AdminConfiguration';
 import { PharmacyBilling } from './pages/PharmacyBilling';
-import { authApi } from './api/services';
+import { FollowUps } from './pages/FollowUps';
+import { authApi, followUpApi } from './api/services';
 import { tokenStore } from './api/client';
 
 const pages = {
@@ -15,6 +16,7 @@ const pages = {
   lab: { title: 'Lab Billing & Reporting', subtitle: 'Manage investigations, billing and lab results', component: LabBilling },
   ipd: { title: 'IPD Billing & Discharge', subtitle: 'Review inpatient charges and prepare discharge summaries', component: IPDBilling },
   pharmacy: { title: 'Pharmacy Billing', subtitle: 'Search medicines, manage quantities and generate invoices', component: PharmacyBilling },
+  followups: { title: 'Patient Follow-ups', subtitle: 'Schedule revisits and complete tomorrow’s reminder calls', component: FollowUps },
   admin: { title: 'Admin Configuration', subtitle: 'Manage hospital masters, pricing and user access', component: AdminConfiguration },
 };
 
@@ -26,7 +28,18 @@ function App() {
   });
   const [activePage, setActivePage] = useState('op');
   const [selectedPatient, setSelectedPatient] = useState(null);
+  const [followUpReminders, setFollowUpReminders] = useState([]);
   const Page = pages[activePage].component;
+
+  const refreshFollowUps = useCallback(async () => {
+    if (!tokenStore.getAccess()) return;
+    try {
+      const result = await followUpApi.reminders();
+      setFollowUpReminders(result || []);
+    } catch {
+      setFollowUpReminders([]);
+    }
+  }, []);
 
   useEffect(() => {
     if (!tokenStore.getAccess()) return;
@@ -40,6 +53,13 @@ function App() {
       setIsAuthenticated(false);
     }).finally(() => setAuthChecking(false));
   }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return undefined;
+    refreshFollowUps();
+    const timer = setInterval(refreshFollowUps, 5 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, [isAuthenticated, refreshFollowUps]);
 
   const handleGlobalPatientSelect = patient => {
     setSelectedPatient(patient);
@@ -60,6 +80,7 @@ function App() {
     sessionStorage.removeItem('medora-user');
     setCurrentUser(null);
     setSelectedPatient(null);
+    setFollowUpReminders([]);
     setActivePage('op');
     setIsAuthenticated(false);
   };
@@ -68,8 +89,8 @@ function App() {
   if (!isAuthenticated) return <LoginPage onLogin={handleLogin}/>;
 
   return (
-    <AppShell activePage={activePage} onNavigate={setActivePage} page={pages[activePage]} onPatientSelect={handleGlobalPatientSelect} onLogout={handleLogout} currentUser={currentUser}>
-      <Page selectedPatient={activePage === 'op' ? selectedPatient : undefined} currentUser={currentUser}/>
+    <AppShell activePage={activePage} onNavigate={setActivePage} page={pages[activePage]} onPatientSelect={handleGlobalPatientSelect} onLogout={handleLogout} currentUser={currentUser} followUpReminders={followUpReminders} refreshFollowUps={refreshFollowUps}>
+      <Page selectedPatient={activePage === 'op' ? selectedPatient : undefined} currentUser={currentUser} reminders={followUpReminders} refreshFollowUps={refreshFollowUps}/>
     </AppShell>
   );
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { doctorApi, labApi, patientApi, pharmacyApi, userApi } from '../api/services';
 import { Icon } from '../components/Icon';
+import { buildLabTestTemplatePreviewHtml, LabReportEditorDialog } from '../components/LabReportEditor';
 import { formatMoney } from '../data/hospitalData';
 
 const roles = ['ADMINISTRATOR', 'RECEPTIONIST', 'LAB_TECHNICIAN', 'BILLING_EXECUTIVE', 'DOCTOR'];
@@ -20,12 +21,51 @@ function StatusBadge({ active }) {
 }
 
 function AdminDialog({ title, subtitle, icon = 'plus', children, onClose, onSubmit, saving, submitLabel = 'Save changes' }) {
+  const [validationAttempted, setValidationAttempted] = useState(false);
+  const submit = event => {
+    if (!event.currentTarget.checkValidity()) {
+      event.preventDefault();
+      setValidationAttempted(true);
+      const invalid = event.currentTarget.querySelector(':invalid');
+      invalid?.focus();
+      invalid?.reportValidity();
+      return;
+    }
+    onSubmit(event);
+  };
   return <div className="dialog-backdrop" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}>
-    <form className="admin-dialog" onSubmit={onSubmit}>
+    <form className={`admin-dialog ${validationAttempted ? 'validation-attempted' : ''}`} onSubmit={submit} onInvalid={() => setValidationAttempted(true)}>
       <div className="dialog-header"><div className="dialog-icon"><Icon name={icon}/></div><div><h2>{title}</h2><p>{subtitle}</p></div><button type="button" onClick={onClose} aria-label="Close">×</button></div>
       <div className="admin-dialog-body">{children}</div>
       <div className="dialog-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button type="submit" className="primary" disabled={saving}>{saving ? 'Saving...' : submitLabel}</button></div>
     </form>
+  </div>;
+}
+
+function DeleteConfirmDialog({ itemType, itemName, warning, deleting, onCancel, onConfirm }) {
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={event => event.target === event.currentTarget && !deleting && onCancel()}>
+    <div className="admin-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-dialog-title" aria-describedby="delete-dialog-description">
+      <div className="admin-confirm-icon"><Icon name="trash" size={24}/></div>
+      <span className="admin-confirm-eyebrow">Permanent action</span>
+      <h2 id="delete-dialog-title">Delete {itemType}?</h2>
+      <p id="delete-dialog-description">You are about to permanently delete <strong>{itemName}</strong>.</p>
+      <div className="admin-confirm-warning"><Icon name="info" size={17}/><span>{warning}</span></div>
+      <div className="admin-confirm-actions">
+        <button type="button" className="secondary" disabled={deleting} onClick={onCancel}>Keep {itemType}</button>
+        <button type="button" className="danger" disabled={deleting} onClick={onConfirm}><Icon name="trash" size={15}/>{deleting ? 'Deleting...' : `Delete ${itemType}`}</button>
+      </div>
+    </div>
+  </div>;
+}
+
+function LabTemplatePreviewDialog({ test, onClose, onEdit }) {
+  const html = buildLabTestTemplatePreviewHtml(test);
+  return <div className="dialog-backdrop lab-template-preview-backdrop" role="presentation">
+    <section className="lab-template-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="lab-template-preview-title">
+      <header><div><span>Patient-independent master template</span><h2 id="lab-template-preview-title">{test.name || 'New test'} report preview</h2><p>This exact field order and section structure is copied into every new patient order for this test.</p></div><button type="button" onClick={onClose} aria-label="Close template preview">×</button></header>
+      <div className="lab-template-preview-scroll"><article className="lab-template-preview-document lab-report-content-print ql-editor" dangerouslySetInnerHTML={{ __html: html }}/></div>
+      <footer><div><Icon name="info" size={16}/><span>Displayed values are samples only. Patient values are entered later in Report Entry.</span></div>{onEdit && <button type="button" className="secondary" onClick={onEdit}>Edit this template</button>}<button type="button" className="primary" onClick={onClose}>Done</button></footer>
+    </section>
   </div>;
 }
 
@@ -42,6 +82,8 @@ function DoctorsPanel({ notify }) {
   const [form, setForm] = useState(empty);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const load = useCallback(() => doctorApi.list(null).then(setDoctors).catch(error => notify(error.message, 'error')).finally(() => setLoading(false)), [notify]);
   useEffect(() => { load(); }, [load]);
   const filtered = useMemo(() => doctors.filter(doctor => `${doctor.name} ${doctor.doctorCode} ${doctor.department} ${doctor.specialization}`.toLowerCase().includes(query.toLowerCase())), [doctors, query]);
@@ -54,11 +96,22 @@ function DoctorsPanel({ notify }) {
       notify(`Doctor ${editing ? 'updated' : 'created'} successfully`, 'success'); setDialogOpen(false); setEditing(null); setForm(empty); await load();
     } catch (error) { notify(error.message, 'error'); } finally { setSaving(false); }
   };
+  const removeDoctor = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await doctorApi.delete(deleteTarget.id);
+      notify('Doctor deleted successfully', 'success');
+      setDeleteTarget(null);
+      await load();
+    } catch (error) { notify(error.message, 'error'); } finally { setDeleting(false); }
+  };
   return <>
     <SectionHeader eyebrow="Clinical directory" title="Manage doctors" description="Maintain doctors, departments, specialties and consultation pricing." action={() => open(null)} actionLabel="Add doctor"/>
     <div className="admin-toolbar"><label><Icon name="search"/><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search doctor, code or department"/></label><span>{filtered.length} doctors</span></div>
-    <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Doctor</th><th>Department</th><th>Specialization</th><th>Consultation fee</th><th>Status</th><th/></tr></thead><tbody>{loading ? <tr><td colSpan="6" className="admin-empty">Loading doctors...</td></tr> : filtered.length ? filtered.map(doctor => <tr key={doctor.id}><td><div className="admin-person"><span>{initials(doctor.name)}</span><div><b>{doctor.name}</b><small>{doctor.doctorCode}</small></div></div></td><td>{doctor.department}</td><td>{doctor.specialization || '—'}</td><td><strong>{formatMoney(doctor.consultationFee)}</strong></td><td><StatusBadge active={doctor.active}/></td><td><button className="admin-edit" onClick={() => open(doctor)}>Edit</button></td></tr>) : <tr><td colSpan="6" className="admin-empty">No doctors found</td></tr>}</tbody></table></div>
+    <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Doctor</th><th>Department</th><th>Specialization</th><th>Consultation fee</th><th>Status</th><th/></tr></thead><tbody>{loading ? <tr><td colSpan="6" className="admin-empty">Loading doctors...</td></tr> : filtered.length ? filtered.map(doctor => <tr key={doctor.id}><td><div className="admin-person"><span>{initials(doctor.name)}</span><div><b>{doctor.name}</b><small>{doctor.doctorCode}</small></div></div></td><td>{doctor.department}</td><td>{doctor.specialization || '—'}</td><td><strong>{formatMoney(doctor.consultationFee)}</strong></td><td><StatusBadge active={doctor.active}/></td><td><div className="medicine-actions"><button type="button" className="admin-edit" onClick={() => open(doctor)}>Edit</button><button type="button" className="admin-delete" onClick={() => setDeleteTarget(doctor)} aria-label={`Delete ${doctor.name}`}><Icon name="trash" size={14}/></button></div></td></tr>) : <tr><td colSpan="6" className="admin-empty">No doctors found</td></tr>}</tbody></table></div>
     {dialogOpen && <AdminDialog title={editing ? 'Edit doctor' : 'Add doctor'} subtitle="Enter clinical profile and billing information" icon="user" onClose={() => { setDialogOpen(false); setEditing(null); setForm(empty); }} onSubmit={submit} saving={saving} submitLabel={editing ? 'Update doctor' : 'Create doctor'}><div className="admin-form-grid"><label><span>Doctor code *</span><input required value={form.doctorCode} onChange={e => setForm({ ...form, doctorCode: e.target.value })} placeholder="DOC-003"/></label><label><span>Doctor name *</span><input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Dr. Full Name"/></label><label><span>Department *</span><input required value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} placeholder="Cardiology"/></label><label><span>Specialization</span><input value={form.specialization || ''} onChange={e => setForm({ ...form, specialization: e.target.value })} placeholder="Interventional cardiology"/></label><label><span>Consultation fee *</span><input required min="0" type="number" value={form.consultationFee} onChange={e => setForm({ ...form, consultationFee: e.target.value })}/></label><label><span>Status</span><select value={String(form.active)} onChange={e => setForm({ ...form, active: e.target.value === 'true' })}><option value="true">Active</option><option value="false">Inactive</option></select></label></div></AdminDialog>}
+    {deleteTarget && <DeleteConfirmDialog itemType="doctor" itemName={deleteTarget.name} warning="Doctors connected to visits, admissions or lab orders cannot be deleted. Mark the doctor inactive when historical records must be preserved." deleting={deleting} onCancel={() => setDeleteTarget(null)} onConfirm={removeDoctor}/>} 
   </>;
 }
 
@@ -91,18 +144,30 @@ function LabTestsPanel({ notify }) {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [previewTest, setPreviewTest] = useState(null);
+  const [templateEditor, setTemplateEditor] = useState(null);
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const load = useCallback(() => labApi.tests('', undefined, null).then(setTests).catch(error => notify(error.message, 'error')), [notify]);
   useEffect(() => { load(); }, [load]);
   const filtered = useMemo(() => tests.filter(test => `${test.name} ${test.code} ${test.department}`.toLowerCase().includes(query.toLowerCase())), [tests, query]);
-  const open = test => { setEditing(test || null); setForm(test ? { ...test, price: test.price ?? '', parameters: test.parameters || [] } : empty); setDialogOpen(true); };
+  const open = test => { setEditing(test || null); setForm(test ? { ...test, price: test.price ?? '', parameters: (test.parameters || []).map(parameter => ({ ...parameter, parameterType: parameter.parameterType || 'NUMERIC' })) } : empty); setDialogOpen(true); };
   const updateParameter = (index, field, value) => setForm(current => ({ ...current, parameters: current.parameters.map((parameter, itemIndex) => itemIndex === index ? { ...parameter, [field]: value } : parameter) }));
-  const addParameter = () => setForm(current => ({ ...current, parameters: [...current.parameters, { parameterId: null, name: '', unit: '', referenceRange: '' }] }));
+  const addParameter = (parameterType = 'NUMERIC') => setForm(current => ({ ...current, parameters: [...current.parameters, { parameterId: null, name: '', unit: '', referenceRange: '', parameterType }] }));
+  const moveParameter = (index, offset) => setForm(current => {
+    const target = index + offset;
+    if (target < 0 || target >= current.parameters.length) return current;
+    const parameters = [...current.parameters];
+    [parameters[index], parameters[target]] = [parameters[target], parameters[index]];
+    return { ...current, parameters };
+  });
   const removeParameter = index => setForm(current => ({ ...current, parameters: current.parameters.filter((_, itemIndex) => itemIndex !== index) }));
   const submit = async event => {
     event.preventDefault();
     setSaving(true);
     try {
-      const parameters = (form.parameters || []).filter(parameter => parameter.name.trim()).map(parameter => ({ ...parameter, name: parameter.name.trim() }));
+      const parameters = (form.parameters || []).filter(parameter => parameter.name.trim()).map(parameter => ({ ...parameter, name: parameter.name.trim(), parameterType: parameter.parameterType || 'NUMERIC', unit: parameter.parameterType === 'NUMERIC' ? parameter.unit : '', referenceRange: parameter.parameterType === 'NUMERIC' ? parameter.referenceRange : '' }));
       const body = { ...form, price: Number(form.price), turnaroundHours: Number(form.turnaroundHours), parameters };
       if (editing) await labApi.updateTest(editing.id, body); else await labApi.createTest(body);
       notify(`Lab test ${editing ? 'updated' : 'created'} successfully`, 'success');
@@ -110,14 +175,37 @@ function LabTestsPanel({ notify }) {
       await load();
     } catch (error) { notify(error.message, 'error'); } finally { setSaving(false); }
   };
+  const removeTest = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await labApi.deleteTest(deleteTarget.id);
+      notify('Lab test deleted successfully', 'success');
+      setDeleteTarget(null);
+      await load();
+    } catch (error) { notify(error.message, 'error'); } finally { setDeleting(false); }
+  };
+  const saveReportTemplate = async html => {
+    if (!templateEditor?.id) return;
+    setSavingTemplate(true);
+    try {
+      await labApi.updateReportTemplate(templateEditor.id, html);
+      notify('Master report template saved successfully', 'success');
+      setTemplateEditor(null);
+      await load();
+    } catch (error) { notify(error.message, 'error'); } finally { setSavingTemplate(false); }
+  };
   return <>
     <SectionHeader eyebrow="Diagnostics catalog" title="Manage lab tests" description="Control test availability, report templates, turnaround times and patient prices. Patient result values are entered only by lab staff in Report entry." action={() => open(null)} actionLabel="Add lab test"/>
     <div className="admin-toolbar"><label><Icon name="search"/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search test, code or department"/></label><span>{filtered.length} tests</span></div>
-    <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Test</th><th>Department</th><th>Specimen</th><th>Turnaround</th><th>Parameters</th><th>Price</th><th>Status</th><th/></tr></thead><tbody>{filtered.length ? filtered.map(test => <tr key={test.id}><td><div className="admin-person lab"><span><Icon name="flask" size={17}/></span><div><b>{test.name}</b><small>{test.code}</small></div></div></td><td>{test.department}</td><td><span className={`specimen-pill ${String(test.specimenType || 'BLOOD').toLowerCase()}`}>{roleLabel(test.specimenType || 'BLOOD')}</span></td><td>{test.turnaroundHours} hours</td><td>{test.parameters?.length || 0}</td><td><strong>{formatMoney(test.price)}</strong></td><td><StatusBadge active={test.active}/></td><td><button className="admin-edit" onClick={() => open(test)}>Edit</button></td></tr>) : <tr><td colSpan="8" className="admin-empty">No lab tests found</td></tr>}</tbody></table></div>
+    <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Test</th><th>Department</th><th>Specimen</th><th>Turnaround</th><th>Parameters</th><th>Price</th><th>Status</th><th/></tr></thead><tbody>{filtered.length ? filtered.map(test => <tr key={test.id}><td><div className="admin-person lab"><span><Icon name="flask" size={17}/></span><div><b>{test.name}</b><small>{test.code}</small></div></div></td><td>{test.department}</td><td><span className={`specimen-pill ${String(test.specimenType || 'BLOOD').toLowerCase()}`}>{roleLabel(test.specimenType || 'BLOOD')}</span></td><td>{test.turnaroundHours} hours</td><td>{test.parameters?.length || 0}</td><td><strong>{formatMoney(test.price)}</strong></td><td><StatusBadge active={test.active}/></td><td><div className="medicine-actions"><button type="button" className="admin-preview" onClick={() => setPreviewTest(test)}><Icon name="file" size={13}/> Preview</button><button type="button" className="admin-edit" onClick={() => open(test)}>Edit</button><button type="button" className="admin-delete" onClick={() => setDeleteTarget(test)} aria-label={`Delete ${test.name}`}><Icon name="trash" size={14}/></button></div></td></tr>) : <tr><td colSpan="8" className="admin-empty">No lab tests found</td></tr>}</tbody></table></div>
     {dialogOpen && <AdminDialog title={editing ? 'Edit lab test' : 'Add lab test'} subtitle="Configure the test catalog and blank report template" icon="flask" onClose={() => setDialogOpen(false)} onSubmit={submit} saving={saving} submitLabel={editing ? 'Update lab test' : 'Create lab test'}>
       <div className="admin-form-grid"><label><span>Test code *</span><input required value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} placeholder="LFT"/></label><label><span>Test name *</span><input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Liver Function Test"/></label><label><span>Department *</span><input required value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} placeholder="Biochemistry"/></label><label><span>Specimen type *</span><select required value={form.specimenType || 'BLOOD'} onChange={e => setForm({ ...form, specimenType: e.target.value })}>{['BLOOD', 'URINE', 'STOOL', 'SWAB', 'SPUTUM', 'OTHER'].map(type => <option key={type} value={type}>{roleLabel(type)}</option>)}</select></label><label><span>Price *</span><input required type="number" min="0" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })}/></label><label><span>Turnaround hours *</span><input required type="number" min="1" value={form.turnaroundHours} onChange={e => setForm({ ...form, turnaroundHours: e.target.value })}/></label><label><span>Status</span><select value={String(form.active)} onChange={e => setForm({ ...form, active: e.target.value === 'true' })}><option value="true">Active</option><option value="false">Inactive</option></select></label></div>
-      <div className="lab-parameter-editor"><div className="lab-parameter-heading"><div><b>Blank report template</b><span>Define labels, units and reference ranges only. Do not enter patient result values here.</span></div><button type="button" onClick={addParameter}><Icon name="plus" size={14}/> Add field</button></div>{form.parameters.length ? <div className="lab-parameter-list"><div className="lab-parameter-labels"><span>Field label</span><span>Unit</span><span>Reference range</span><span/></div>{form.parameters.map((parameter, index) => <div className="lab-parameter-row" key={parameter.parameterId || index}><input required value={parameter.name} onChange={e => updateParameter(index, 'name', e.target.value)} placeholder="Haemoglobin"/><input value={parameter.unit || ''} onChange={e => updateParameter(index, 'unit', e.target.value)} placeholder="g/dL"/><input value={parameter.referenceRange || ''} onChange={e => updateParameter(index, 'referenceRange', e.target.value)} placeholder="12.0 - 16.0"/><button type="button" onClick={() => removeParameter(index)} aria-label={`Remove ${parameter.name || 'field'}`}><Icon name="trash" size={14}/></button></div>)}</div> : <p className="admin-form-note">No template fields configured. The system will show a blank general-result field to the Lab Technician in Report entry.</p>}</div>
+      <div className="lab-parameter-editor"><div className="lab-parameter-heading"><div><b>Blank report template</b><span>Add numeric values, free-text observations, and section headings in the exact order they should appear.</span></div><div className="lab-template-add-actions"><button type="button" className="template-preview-action" onClick={() => setPreviewTest(form)}><Icon name="file" size={14}/> Preview report</button><button type="button" onClick={() => addParameter('NUMERIC')}><Icon name="plus" size={14}/> Add field</button><button type="button" onClick={() => addParameter('HEADING')}>Add heading</button></div></div>{form.parameters.length ? <div className="lab-parameter-list"><div className="lab-parameter-labels"><span>Type</span><span>Field label / heading</span><span>Unit</span><span>Reference range</span><span>Order</span></div>{form.parameters.map((parameter, index) => <div className={`lab-parameter-row ${parameter.parameterType === 'HEADING' ? 'heading' : ''}`} key={parameter.parameterId || index}><select value={parameter.parameterType || 'NUMERIC'} onChange={e => updateParameter(index, 'parameterType', e.target.value)}><option value="NUMERIC">Numeric</option><option value="TEXT">Text</option><option value="HEADING">Heading</option></select><input required value={parameter.name} onChange={e => updateParameter(index, 'name', e.target.value)} placeholder={parameter.parameterType === 'HEADING' ? 'DIFFERENTIAL COUNT' : 'Haemoglobin'}/><input disabled={parameter.parameterType !== 'NUMERIC'} value={parameter.unit || ''} onChange={e => updateParameter(index, 'unit', e.target.value)} placeholder={parameter.parameterType === 'TEXT' ? 'Not used for text' : 'g/dL'}/><input disabled={parameter.parameterType !== 'NUMERIC'} value={parameter.referenceRange || ''} onChange={e => updateParameter(index, 'referenceRange', e.target.value)} placeholder={parameter.parameterType === 'TEXT' ? 'Not used for text' : '12.0 - 16.0'}/><div className="lab-parameter-actions"><button type="button" disabled={index === 0} onClick={() => moveParameter(index, -1)} aria-label={`Move ${parameter.name || 'field'} up`}>↑</button><button type="button" disabled={index === form.parameters.length - 1} onClick={() => moveParameter(index, 1)} aria-label={`Move ${parameter.name || 'field'} down`}>↓</button><button type="button" onClick={() => removeParameter(index)} aria-label={`Remove ${parameter.name || 'field'}`}><Icon name="trash" size={13}/></button></div></div>)}</div> : <p className="admin-form-note">No template fields configured. The system will create one free-text general-result field.</p>}</div>
     </AdminDialog>}
+    {deleteTarget && <DeleteConfirmDialog itemType="lab test" itemName={deleteTarget.name} warning="The catalog item and its report template will be removed permanently. Existing completed lab orders and reports are retained." deleting={deleting} onCancel={() => setDeleteTarget(null)} onConfirm={removeTest}/>} 
+    {previewTest && <LabTemplatePreviewDialog test={previewTest} onClose={() => setPreviewTest(null)} onEdit={!dialogOpen && previewTest.id ? () => { const selected = previewTest; setPreviewTest(null); setTemplateEditor(selected); } : null}/>} 
+    {templateEditor && <LabReportEditorDialog initialHtml={buildLabTestTemplatePreviewHtml(templateEditor)} resetHtml={buildLabTestTemplatePreviewHtml({ ...templateEditor, reportTemplateHtml: null })} onClose={() => !savingTemplate && setTemplateEditor(null)} onSave={saveReportTemplate} title={`Edit ${templateEditor.name} master template`} subtitle="Click inside any cell to edit it. To insert between fields, place the cursor in a row and use Add result row." saveLabel={savingTemplate ? 'Saving...' : 'Save master template'}/>} 
   </>;
 }
 

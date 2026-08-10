@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '../components/Icon';
 import { HospitalLogo } from '../components/HospitalLogo';
+import { HospitalPrintHeader } from '../components/HospitalPrintHeader';
 import { FormField, SectionTitle } from '../components/ui/FormField';
 import { doctorApi, opApi, patientApi } from '../api/services';
 import { usePatientSearch } from '../hooks/usePatientSearch';
@@ -155,10 +156,7 @@ function OPPrintReceipt({ patient, age, visit, doctor, consultation, discount, t
     ? `${visit?.appointmentDate || '—'} ${visit?.appointmentTime ? `at ${visit.appointmentTime}` : ''}`
     : '—';
   return <article className="print-receipt op-print-receipt">
-    <header className="receipt-hospital-header">
-      <div className="receipt-brand"><HospitalLogo className="receipt-logo"/><div><h1><span>Lakshmi Sreenivaasa</span><span>Multi Speciality Hospital</span></h1><p>Healing · Caring · Serving</p></div></div>
-      <address><strong>OPD Billing & Registration</strong><br/>Generated securely by Lakshmi Sreenivaasa HMS<br/>Authorized hospital use</address>
-    </header>
+    <HospitalPrintHeader/>
     <div className="receipt-title">OPD REGISTRATION & PAYMENT RECEIPT</div>
     <section className="receipt-details">
       <div>
