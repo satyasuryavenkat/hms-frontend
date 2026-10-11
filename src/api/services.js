@@ -1,5 +1,15 @@
 import { apiRequest, tokenStore } from './client';
 
+export const billingHistoryApi = {
+  list: (section, query) => apiRequest(({ op: '/op-visits', lab: '/lab-orders', ipd: '/ipd-admissions', daycare: '/daycare-admissions', pharmacy: '/pharmacy/sales' })[section] + '/history', { query }),
+};
+
+export const overviewApi = {
+  records: (section, query) => apiRequest(`/overview/${section}/records`, { query }),
+  currentBeds: () => apiRequest('/overview/current-beds'),
+  get: (startDate, endDate) => apiRequest('/overview', { query: { startDate, endDate } }),
+};
+
 export const authApi = {
   login: body => apiRequest('/auth/login', { method: 'POST', body, auth: false }),
   me: () => apiRequest('/auth/me'),
@@ -45,9 +55,11 @@ export const labApi = {
   getOrder: id => apiRequest(`/lab-orders/${id}`),
   cancelOrder: (id, reason) => apiRequest(`/lab-orders/${id}/cancel`, { method: 'PATCH', body: { reason } }),
   pendingReports: query => apiRequest('/lab-reports/pending', { query }),
+  completedReports: query => apiRequest('/lab-reports/completed', { query }),
   getReport: id => apiRequest(`/lab-orders/${id}/report`),
   saveReport: (id, body) => apiRequest(`/lab-orders/${id}/report`, { method: 'PUT', body }),
   publishReport: (id, body) => apiRequest(`/lab-orders/${id}/report/publish`, { method: 'POST', body }),
+  downloadReport: (id, testId) => apiRequest(testId ? `/lab-orders/${id}/tests/${testId}/report.pdf` : `/lab-orders/${id}/report.pdf`, { responseType: 'blob' }),
 };
 
 export const userApi = {
@@ -58,6 +70,7 @@ export const userApi = {
 };
 
 export const ipdApi = {
+  updateDates: (id, body) => apiRequest(`/ipd-admissions/${id}/dates`, { method: 'PATCH', body }),
   createAdmission: body => apiRequest('/ipd-admissions', { method: 'POST', body }),
   updateAdmission: (id, body) => apiRequest(`/ipd-admissions/${id}`, { method: 'PUT', body }),
   searchAdmissions: (query = '', status = 'ACTIVE') => apiRequest('/ipd-admissions/search', { query: { query, status } }),
@@ -67,6 +80,10 @@ export const ipdApi = {
   updateCharge: (id, chargeId, body) => apiRequest(`/ipd-admissions/${id}/charges/${chargeId}`, { method: 'PUT', body }),
   deleteCharge: (id, chargeId) => apiRequest(`/ipd-admissions/${id}/charges/${chargeId}`, { method: 'DELETE' }),
   catalog: () => apiRequest('/ipd-charge-catalog'),
+  catalogItems: active => apiRequest('/ipd-charge-catalog/items', { query: { active } }),
+  createCatalogItem: body => apiRequest('/ipd-charge-catalog/items', { method: 'POST', body }),
+  updateCatalogItem: (id, body) => apiRequest(`/ipd-charge-catalog/items/${id}`, { method: 'PUT', body }),
+  deleteCatalogItem: id => apiRequest(`/ipd-charge-catalog/items/${id}`, { method: 'DELETE' }),
   addAdvance: (id, body) => apiRequest(`/ipd-admissions/${id}/advances`, { method: 'POST', body }),
   advances: id => apiRequest(`/ipd-admissions/${id}/advances`),
   finalBill: id => apiRequest(`/ipd-admissions/${id}/final-bill`),
@@ -76,7 +93,28 @@ export const ipdApi = {
   discharge: id => apiRequest(`/ipd-admissions/${id}/discharge`),
 };
 
+export const daycareApi = {
+  updateDates: (id, body) => apiRequest(`/daycare-admissions/${id}/dates`, { method: 'PATCH', body }),
+  createAdmission: body => apiRequest('/daycare-admissions', { method: 'POST', body }),
+  updateAdmission: (id, body) => apiRequest(`/daycare-admissions/${id}`, { method: 'PUT', body }),
+  searchAdmissions: (query = '', status = 'ACTIVE') => apiRequest('/daycare-admissions/search', { query: { query, status } }),
+  getAdmission: id => apiRequest(`/daycare-admissions/${id}`),
+  charges: id => apiRequest(`/daycare-admissions/${id}/charges`),
+  addCharge: (id, body) => apiRequest(`/daycare-admissions/${id}/charges`, { method: 'POST', body }),
+  updateCharge: (id, chargeId, body) => apiRequest(`/daycare-admissions/${id}/charges/${chargeId}`, { method: 'PUT', body }),
+  deleteCharge: (id, chargeId) => apiRequest(`/daycare-admissions/${id}/charges/${chargeId}`, { method: 'DELETE' }),
+  catalog: () => apiRequest('/daycare-admissions/charge-catalog'),
+  addAdvance: (id, body) => apiRequest(`/daycare-admissions/${id}/advances`, { method: 'POST', body }),
+  advances: id => apiRequest(`/daycare-admissions/${id}/advances`),
+  finalBill: id => apiRequest(`/daycare-admissions/${id}/final-bill`),
+  settle: (id, body) => apiRequest(`/daycare-admissions/${id}/final-bill/settle`, { method: 'POST', body }),
+  saveDischarge: (id, body) => apiRequest(`/daycare-admissions/${id}/discharge`, { method: 'PUT', body }),
+  finalizeDischarge: (id, confirmedBy) => apiRequest(`/daycare-admissions/${id}/discharge/finalize`, { method: 'POST', body: { confirmedBy } }),
+  discharge: id => apiRequest(`/daycare-admissions/${id}/discharge`),
+};
+
 export const pharmacyApi = {
+  sales: query => apiRequest('/pharmacy/sales', { query }),
   medicines: (query = '', active) => apiRequest('/pharmacy/medicines', { query: { query, active } }),
   medicine: id => apiRequest(`/pharmacy/medicines/${id}`),
   createMedicine: body => apiRequest('/pharmacy/medicines', { method: 'POST', body }),

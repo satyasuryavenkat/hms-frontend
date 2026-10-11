@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { doctorApi, labApi, patientApi, pharmacyApi, userApi } from '../api/services';
+import { doctorApi, ipdApi, labApi, patientApi, pharmacyApi, userApi } from '../api/services';
 import { Icon } from '../components/Icon';
 import { buildLabTestTemplatePreviewHtml, LabReportEditorDialog } from '../components/LabReportEditor';
 import { formatMoney } from '../data/hospitalData';
+import { effectiveModulePermissions, modules, permissionsForSubmission, roleDefaultPermissions } from '../auth/moduleAccess';
 
 const roles = ['ADMINISTRATOR', 'RECEPTIONIST', 'LAB_TECHNICIAN', 'BILLING_EXECUTIVE', 'DOCTOR'];
 const tabs = [
@@ -10,6 +11,7 @@ const tabs = [
   { id: 'patients', label: 'Patients', description: 'Patient records', icon: 'file' },
   { id: 'lab', label: 'Lab tests', description: 'Catalog & prices', icon: 'flask' },
   { id: 'medicines', label: 'Medicines', description: 'Pharmacy inventory', icon: 'pill' },
+  { id: 'ipdCharges', label: 'IPD charges', description: 'Services & amounts', icon: 'bed' },
   { id: 'users', label: 'Users', description: 'Access & roles', icon: 'lock' },
 ];
 
@@ -132,7 +134,7 @@ function PatientsPanel({ notify }) {
     <div className="admin-toolbar"><label><Icon name="search"/><input value={query} onChange={event => { setQuery(event.target.value); setPage(0); }} placeholder="Search name, UHID or mobile"/></label><span>{meta.totalElements || 0} patients</span></div>
     <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Patient</th><th>UHID</th><th>Age / Gender</th><th>Mobile</th><th>Registered</th><th/></tr></thead><tbody>{loading ? <tr><td colSpan="6" className="admin-empty">Loading patients...</td></tr> : patients.length ? patients.map(patient => <tr key={patient.id}><td><div className="admin-person patient"><span>{initials(patient.name)}</span><div><b>{patient.name}</b><small>{patient.address || 'Address not provided'}</small></div></div></td><td><span className="admin-code">{patient.uhid}</span></td><td>{patient.age} yrs · {roleLabel(patient.gender)}</td><td>{patient.mobile}</td><td>{patient.createdAt ? new Date(patient.createdAt).toLocaleDateString('en-IN') : '—'}</td><td><button className="admin-edit" onClick={() => view(patient)}>View details</button></td></tr>) : <tr><td colSpan="6" className="admin-empty">No patients found</td></tr>}</tbody></table></div>
     <div className="admin-pagination"><button disabled={page === 0} onClick={() => setPage(value => value - 1)}>Previous</button><span>Page {page + 1} of {Math.max(meta.totalPages || 1, 1)}</span><button disabled={page + 1 >= meta.totalPages} onClick={() => setPage(value => value + 1)}>Next</button></div>
-    {selected && <div className="dialog-backdrop" onMouseDown={event => event.target === event.currentTarget && setSelected(null)}><div className="patient-detail-dialog"><div className="patient-detail-hero"><div className="patient-detail-avatar">{initials(selected.name)}</div><div><span>Patient profile</span><h2>{selected.name}</h2><p>{selected.uhid}</p></div><button onClick={() => setSelected(null)}>×</button></div><div className="patient-detail-grid"><div><small>Mobile number</small><strong>{selected.mobile}</strong></div><div><small>Date of birth</small><strong>{selected.dateOfBirth || '—'}</strong></div><div><small>Age</small><strong>{selected.age} years</strong></div><div><small>Gender</small><strong>{roleLabel(selected.gender)}</strong></div><div className="wide"><small>Address</small><strong>{selected.address || 'Not provided'}</strong></div><div className="wide"><small>Registered on</small><strong>{selected.createdAt ? new Date(selected.createdAt).toLocaleString('en-IN') : '—'}</strong></div></div><div className="dialog-actions"><button className="primary" onClick={() => setSelected(null)}>Close profile</button></div></div></div>}
+    {selected && <div className="dialog-backdrop" onMouseDown={event => event.target === event.currentTarget && setSelected(null)}><div className="patient-detail-dialog"><div className="patient-detail-hero"><div className="patient-detail-avatar">{initials(selected.name)}</div><div><span>Patient profile</span><h2>{selected.name}</h2><p>{selected.uhid}</p></div><button onClick={() => setSelected(null)}>×</button></div><div className="patient-detail-grid"><div><small>Mobile number</small><strong>{selected.mobile}</strong></div><div><small>Age</small><strong>{selected.age} years</strong></div><div><small>Gender</small><strong>{roleLabel(selected.gender)}</strong></div><div><small>Registered on</small><strong>{selected.createdAt ? new Date(selected.createdAt).toLocaleString('en-IN') : '—'}</strong></div><div className="wide"><small>Address</small><strong>{selected.address || 'Not provided'}</strong></div></div><div className="dialog-actions"><button className="primary" onClick={() => setSelected(null)}>Close profile</button></div></div></div>}
   </>;
 }
 
@@ -200,7 +202,7 @@ function LabTestsPanel({ notify }) {
     <div className="admin-toolbar"><label><Icon name="search"/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search test, code or department"/></label><span>{filtered.length} tests</span></div>
     <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Test</th><th>Department</th><th>Specimen</th><th>Turnaround</th><th>Parameters</th><th>Price</th><th>Status</th><th/></tr></thead><tbody>{filtered.length ? filtered.map(test => <tr key={test.id}><td><div className="admin-person lab"><span><Icon name="flask" size={17}/></span><div><b>{test.name}</b><small>{test.code}</small></div></div></td><td>{test.department}</td><td><span className={`specimen-pill ${String(test.specimenType || 'BLOOD').toLowerCase()}`}>{roleLabel(test.specimenType || 'BLOOD')}</span></td><td>{test.turnaroundHours} hours</td><td>{test.parameters?.length || 0}</td><td><strong>{formatMoney(test.price)}</strong></td><td><StatusBadge active={test.active}/></td><td><div className="medicine-actions"><button type="button" className="admin-preview" onClick={() => setPreviewTest(test)}><Icon name="file" size={13}/> Preview</button><button type="button" className="admin-edit" onClick={() => open(test)}>Edit</button><button type="button" className="admin-delete" onClick={() => setDeleteTarget(test)} aria-label={`Delete ${test.name}`}><Icon name="trash" size={14}/></button></div></td></tr>) : <tr><td colSpan="8" className="admin-empty">No lab tests found</td></tr>}</tbody></table></div>
     {dialogOpen && <AdminDialog title={editing ? 'Edit lab test' : 'Add lab test'} subtitle="Configure the test catalog and blank report template" icon="flask" onClose={() => setDialogOpen(false)} onSubmit={submit} saving={saving} submitLabel={editing ? 'Update lab test' : 'Create lab test'}>
-      <div className="admin-form-grid"><label><span>Test code *</span><input required value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} placeholder="LFT"/></label><label><span>Test name *</span><input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Liver Function Test"/></label><label><span>Department *</span><input required value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} placeholder="Biochemistry"/></label><label><span>Specimen type *</span><select required value={form.specimenType || 'BLOOD'} onChange={e => setForm({ ...form, specimenType: e.target.value })}>{['BLOOD', 'URINE', 'STOOL', 'SWAB', 'SPUTUM', 'OTHER'].map(type => <option key={type} value={type}>{roleLabel(type)}</option>)}</select></label><label><span>Price *</span><input required type="number" min="0" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })}/></label><label><span>Turnaround hours *</span><input required type="number" min="1" value={form.turnaroundHours} onChange={e => setForm({ ...form, turnaroundHours: e.target.value })}/></label><label><span>Status</span><select value={String(form.active)} onChange={e => setForm({ ...form, active: e.target.value === 'true' })}><option value="true">Active</option><option value="false">Inactive</option></select></label></div>
+      <div className="admin-form-grid"><label><span>Test code *</span><input required value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} placeholder="LFT"/></label><label><span>Test name *</span><input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Liver Function Test"/></label><label><span>Department *</span><input required value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} placeholder="Biochemistry"/></label><label><span>Specimen type *</span><select required value={form.specimenType || 'BLOOD'} onChange={e => setForm({ ...form, specimenType: e.target.value })}>{['BLOOD', 'SERUM', 'URINE', 'STOOL', 'SWAB', 'SPUTUM', 'PUS', 'SLIDE_PREPARATION', 'OTHER'].map(type => <option key={type} value={type}>{roleLabel(type)}</option>)}</select></label><label><span>Price *</span><input required type="number" min="0" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })}/></label><label><span>Turnaround hours *</span><input required type="number" min="1" value={form.turnaroundHours} onChange={e => setForm({ ...form, turnaroundHours: e.target.value })}/></label><label><span>Status</span><select value={String(form.active)} onChange={e => setForm({ ...form, active: e.target.value === 'true' })}><option value="true">Active</option><option value="false">Inactive</option></select></label></div>
       <div className="lab-parameter-editor"><div className="lab-parameter-heading"><div><b>Blank report template</b><span>Add numeric values, free-text observations, and section headings in the exact order they should appear.</span></div><div className="lab-template-add-actions"><button type="button" className="template-preview-action" onClick={() => setPreviewTest(form)}><Icon name="file" size={14}/> Preview report</button><button type="button" onClick={() => addParameter('NUMERIC')}><Icon name="plus" size={14}/> Add field</button><button type="button" onClick={() => addParameter('HEADING')}>Add heading</button></div></div>{form.parameters.length ? <div className="lab-parameter-list"><div className="lab-parameter-labels"><span>Type</span><span>Field label / heading</span><span>Unit</span><span>Reference range</span><span>Order</span></div>{form.parameters.map((parameter, index) => <div className={`lab-parameter-row ${parameter.parameterType === 'HEADING' ? 'heading' : ''}`} key={parameter.parameterId || index}><select value={parameter.parameterType || 'NUMERIC'} onChange={e => updateParameter(index, 'parameterType', e.target.value)}><option value="NUMERIC">Numeric</option><option value="TEXT">Text</option><option value="HEADING">Heading</option></select><input required value={parameter.name} onChange={e => updateParameter(index, 'name', e.target.value)} placeholder={parameter.parameterType === 'HEADING' ? 'DIFFERENTIAL COUNT' : 'Haemoglobin'}/><input disabled={parameter.parameterType !== 'NUMERIC'} value={parameter.unit || ''} onChange={e => updateParameter(index, 'unit', e.target.value)} placeholder={parameter.parameterType === 'TEXT' ? 'Not used for text' : 'g/dL'}/><input disabled={parameter.parameterType !== 'NUMERIC'} value={parameter.referenceRange || ''} onChange={e => updateParameter(index, 'referenceRange', e.target.value)} placeholder={parameter.parameterType === 'TEXT' ? 'Not used for text' : '12.0 - 16.0'}/><div className="lab-parameter-actions"><button type="button" disabled={index === 0} onClick={() => moveParameter(index, -1)} aria-label={`Move ${parameter.name || 'field'} up`}>↑</button><button type="button" disabled={index === form.parameters.length - 1} onClick={() => moveParameter(index, 1)} aria-label={`Move ${parameter.name || 'field'} down`}>↓</button><button type="button" onClick={() => removeParameter(index)} aria-label={`Remove ${parameter.name || 'field'}`}><Icon name="trash" size={13}/></button></div></div>)}</div> : <p className="admin-form-note">No template fields configured. The system will create one free-text general-result field.</p>}</div>
     </AdminDialog>}
     {deleteTarget && <DeleteConfirmDialog itemType="lab test" itemName={deleteTarget.name} warning="The catalog item and its report template will be removed permanently. Existing completed lab orders and reports are retained." deleting={deleting} onCancel={() => setDeleteTarget(null)} onConfirm={removeTest}/>} 
@@ -210,7 +212,7 @@ function LabTestsPanel({ notify }) {
 }
 
 function MedicinesPanel({ notify }) {
-  const empty = { manufacturerCode: '', name: '', genericName: '', type: 'TABLET', manufacturerName: '', batchNumber: '', description: '', imageData: '', quantity: 0, unitPrice: '', taxPercent: 0, expiryDate: '', active: true };
+  const empty = { name: '', type: 'TABLET', unitPrice: '', active: true };
   const [medicines, setMedicines] = useState([]);
   const [query, setQuery] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -223,19 +225,10 @@ function MedicinesPanel({ notify }) {
   const filtered = useMemo(() => medicines.filter(item => `${item.name} ${item.genericName} ${item.manufacturerCode} ${item.manufacturerName} ${item.type} ${item.batchNumber}`.toLowerCase().includes(query.toLowerCase())), [medicines, query]);
   const open = medicine => { setEditing(medicine || null); setForm(medicine ? { ...medicine, unitPrice: medicine.unitPrice ?? '', taxPercent: medicine.taxPercent ?? 0 } : empty); setDialogOpen(true); };
   const close = () => { setDialogOpen(false); setEditing(null); setForm(empty); };
-  const chooseImage = event => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) return notify('Select a valid image file.', 'error');
-    if (file.size > 3 * 1024 * 1024) return notify('Medicine image must be smaller than 3 MB.', 'error');
-    const reader = new FileReader();
-    reader.onload = () => setForm(current => ({ ...current, imageData: reader.result }));
-    reader.readAsDataURL(file);
-  };
   const submit = async event => {
     event.preventDefault(); setSaving(true);
     try {
-      const body = { ...form, quantity: Number(form.quantity), unitPrice: Number(form.unitPrice), taxPercent: Number(form.taxPercent) };
+      const body = { name: form.name.trim(), type: form.type, unitPrice: Number(form.unitPrice), active: form.active };
       if (editing) await pharmacyApi.updateMedicine(editing.id, body); else await pharmacyApi.createMedicine(body);
       notify(`Medicine ${editing ? 'updated' : 'created'} successfully`, 'success'); close(); await load();
     } catch (error) { notify(error.message, 'error'); } finally { setSaving(false); }
@@ -246,38 +239,141 @@ function MedicinesPanel({ notify }) {
     catch (error) { notify(error.message, 'error'); }
   };
   return <>
-    <SectionHeader eyebrow="Pharmacy inventory" title="Manage medicines" description="Maintain medicine details, images, batches, expiry dates, pricing and available stock." action={() => open(null)} actionLabel="Add medicine"/>
+    <SectionHeader eyebrow="Pharmacy inventory" title="Manage medicines" description="Maintain medicine names, types, unit prices and status." action={() => open(null)} actionLabel="Add medicine"/>
     <div className="admin-toolbar"><label><Icon name="search"/><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search medicine, code, batch or manufacturer"/></label><span>{filtered.length} medicines</span></div>
     <div className="admin-table-wrap"><table className="admin-table medicine-admin-table"><thead><tr><th>Medicine</th><th>Type / Batch</th><th>Manufacturer code</th><th>Expiry</th><th>Stock</th><th>Price</th><th>Status</th><th/></tr></thead><tbody>{loading ? <tr><td colSpan="8" className="admin-empty">Loading medicines...</td></tr> : filtered.length ? filtered.map(medicine => <tr key={medicine.id}><td><div className="admin-person medicine"><span>{medicine.imageData ? <img src={medicine.imageData} alt=""/> : <Icon name="pill" size={17}/>}</span><div><b>{medicine.name}</b><small>{medicine.genericName || medicine.manufacturerName || 'No generic name'}</small></div></div></td><td>{medicine.type}<small>Batch {medicine.batchNumber || '—'}</small></td><td><span className="admin-code">{medicine.manufacturerCode}</span></td><td className={medicine.expired ? 'expired-stock' : ''}>{medicine.expiryDate}</td><td><strong>{medicine.quantity}</strong><small>units</small></td><td><strong>{formatMoney(medicine.unitPrice)}</strong><small>{medicine.taxPercent}% tax</small></td><td><StatusBadge active={medicine.active && !medicine.expired}/></td><td><div className="medicine-actions"><button className="admin-edit" onClick={() => open(medicine)}>Edit</button><button className="admin-delete" onClick={() => removeMedicine(medicine)} aria-label={`Delete ${medicine.name}`}><Icon name="trash" size={14}/></button></div></td></tr>) : <tr><td colSpan="8" className="admin-empty">No medicines found</td></tr>}</tbody></table></div>
-    {dialogOpen && <AdminDialog title={editing ? 'Edit medicine' : 'Add medicine'} subtitle="Enter inventory, identification, expiry and billing details" icon="pill" onClose={close} onSubmit={submit} saving={saving} submitLabel={editing ? 'Update medicine' : 'Create medicine'}>
-      <div className="medicine-image-field"><div className="medicine-image-preview">{form.imageData ? <img src={form.imageData} alt="Medicine preview"/> : <Icon name="pill" size={30}/>}</div><div><b>Medicine image</b><p>JPG, PNG or WebP up to 3 MB.</p><label className="image-upload-button">Choose image<input type="file" accept="image/*" onChange={chooseImage}/></label>{form.imageData && <button type="button" className="remove-image" onClick={() => setForm({ ...form, imageData: '' })}>Remove</button>}</div></div>
+    {dialogOpen && <AdminDialog title={editing ? 'Edit medicine' : 'Add medicine'} subtitle="Enter medicine name, type, unit price and status" icon="pill" onClose={close} onSubmit={submit} saving={saving} submitLabel={editing ? 'Update medicine' : 'Create medicine'}>
       <div className="admin-form-grid">
         <label><span>Medicine name *</span><input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Paracetamol 500 mg"/></label>
-        <label><span>Generic name</span><input value={form.genericName || ''} onChange={e => setForm({ ...form, genericName: e.target.value })} placeholder="Acetaminophen"/></label>
-        <label><span>Type *</span><select required value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}>{['TABLET', 'CAPSULE', 'SYRUP', 'INJECTION', 'DROPS', 'CREAM', 'OINTMENT', 'INHALER', 'OTHER'].map(type => <option key={type}>{roleLabel(type)}</option>)}</select></label>
-        <label><span>Manufacturer name</span><input value={form.manufacturerName || ''} onChange={e => setForm({ ...form, manufacturerName: e.target.value })} placeholder="Manufacturer"/></label>
-        <label><span>Manufacturer code *</span><input required value={form.manufacturerCode} onChange={e => setForm({ ...form, manufacturerCode: e.target.value })} placeholder="MED-PAR-500"/></label>
-        <label><span>Batch number</span><input value={form.batchNumber || ''} onChange={e => setForm({ ...form, batchNumber: e.target.value })} placeholder="B2026-07"/></label>
-        <label><span>Quantity *</span><input required type="number" min="0" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })}/></label>
+        <label><span>Type *</span><select required value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}>{['TABLET', 'CAPSULE', 'SYRUP', 'INJECTION', 'DROPS', 'CREAM', 'OINTMENT', 'INHALER', 'OTHER'].map(type => <option key={type} value={type}>{roleLabel(type)}</option>)}</select></label>
         <label><span>Unit price *</span><input required type="number" min="0" step="0.01" value={form.unitPrice} onChange={e => setForm({ ...form, unitPrice: e.target.value })}/></label>
-        <label><span>Tax percent *</span><input required type="number" min="0" max="100" step="0.01" value={form.taxPercent} onChange={e => setForm({ ...form, taxPercent: e.target.value })}/></label>
-        <label><span>Expiry date *</span><input required type="date" value={form.expiryDate} onChange={e => setForm({ ...form, expiryDate: e.target.value })}/></label>
         <label><span>Status</span><select value={String(form.active)} onChange={e => setForm({ ...form, active: e.target.value === 'true' })}><option value="true">Active</option><option value="false">Inactive</option></select></label>
-        <label className="admin-wide-field"><span>Description</span><textarea rows="3" maxLength="2000" value={form.description || ''} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Composition, storage instructions and other medicine details"/></label>
       </div>
     </AdminDialog>}
   </>;
 }
 
+function IpdChargesPanel({ notify }) {
+  const empty = { serviceName: '', category: '', defaultRate: '', active: true };
+  const [items, setItems] = useState([]);
+  const [query, setQuery] = useState('');
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [form, setForm] = useState(empty);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(() => ipdApi.catalogItems().then(setItems).catch(error => notify(error.message, 'error')).finally(() => setLoading(false)), [notify]);
+  useEffect(() => { load(); }, [load]);
+  const filtered = useMemo(() => items.filter(item => `${item.serviceName} ${item.category}`.toLowerCase().includes(query.toLowerCase())), [items, query]);
+  const open = item => {
+    setEditing(item || null);
+    setForm(item ? { ...item, defaultRate: item.defaultRate ?? '' } : empty);
+    setDialogOpen(true);
+  };
+  const close = () => { setDialogOpen(false); setEditing(null); setForm(empty); };
+  const submit = async event => {
+    event.preventDefault(); setSaving(true);
+    try {
+      const body = { serviceName: form.serviceName, category: form.category, department: editing?.department || 'Inpatient Services', defaultRate: Number(form.defaultRate), active: form.active };
+      if (editing) await ipdApi.updateCatalogItem(editing.id, body); else await ipdApi.createCatalogItem(body);
+      notify(`IPD charge ${editing ? 'updated' : 'created'} successfully`, 'success'); close(); await load();
+    } catch (error) { notify(error.message, 'error'); } finally { setSaving(false); }
+  };
+  const remove = async () => {
+    setDeleting(true);
+    try { await ipdApi.deleteCatalogItem(deleteTarget.id); notify('IPD charge configuration deleted successfully', 'success'); setDeleteTarget(null); await load(); }
+    catch (error) { notify(error.message, 'error'); } finally { setDeleting(false); }
+  };
+  return <>
+    <SectionHeader eyebrow="Inpatient billing master" title="Manage IPD charges" description="Configure categories, service names, charges and availability for inpatient billing." action={() => open(null)} actionLabel="Add IPD charge"/>
+    <div className="admin-toolbar"><label><Icon name="search"/><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search service or category"/></label><span>{filtered.length} services</span></div>
+    <div className="admin-table-wrap"><table className="admin-table ipd-charge-admin-table"><thead><tr><th>Service Name</th><th>Category</th><th>Charges</th><th>Status</th><th/></tr></thead><tbody>{loading ? <tr><td colSpan="5" className="admin-empty">Loading IPD charges...</td></tr> : filtered.length ? filtered.map(item => <tr key={item.id}><td><b>{item.serviceName}</b></td><td><b>{item.category}</b></td><td><strong>{formatMoney(item.defaultRate)}</strong></td><td><StatusBadge active={item.active}/></td><td><div className="medicine-actions"><button className="admin-edit" onClick={() => open(item)}>Edit</button><button className="admin-delete" onClick={() => setDeleteTarget(item)} aria-label={`Delete ${item.serviceName}`}><Icon name="trash" size={14}/></button></div></td></tr>) : <tr><td colSpan="5" className="admin-empty">No IPD charge configurations found</td></tr>}</tbody></table></div>
+    {dialogOpen && <AdminDialog title={editing ? 'Edit IPD charge' : 'Add IPD charge'} subtitle="This service and amount will appear as dropdown options during IPD billing" icon="bed" onClose={close} onSubmit={submit} saving={saving} submitLabel={editing ? 'Update charge' : 'Create charge'}>
+      <div className="admin-form-grid">
+        <label><span>Service name *</span><input required maxLength="180" value={form.serviceName} onChange={e => setForm({ ...form, serviceName: e.target.value })} placeholder="General ward stay"/></label>
+        <label><span>Category *</span><input required maxLength="120" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} placeholder="Room Charges"/></label>
+        <label><span>Charges *</span><input required type="number" min="0" step="0.01" value={form.defaultRate} onChange={e => setForm({ ...form, defaultRate: e.target.value })}/></label>
+        <label><span>Status</span><select value={String(form.active)} onChange={e => setForm({ ...form, active: e.target.value === 'true' })}><option value="true">Active</option><option value="false">Inactive</option></select></label>
+      </div>
+      <p className="admin-form-note">Changing a price affects new IPD charges only. Charges already added to patient bills retain their saved amount.</p>
+    </AdminDialog>}
+    {deleteTarget && <DeleteConfirmDialog itemType="IPD charge" itemName={deleteTarget.serviceName} warning="The service will be removed from future Add Charges dropdowns. Existing patient bill entries remain unchanged." deleting={deleting} onCancel={() => setDeleteTarget(null)} onConfirm={remove}/>}
+  </>;
+}
+
 function UsersPanel({ notify, currentUser }) {
-  const empty = { username: '', displayName: '', password: '', role: 'RECEPTIONIST', active: true, permissions: [] };
-  const [users, setUsers] = useState([]); const [query, setQuery] = useState(''); const [dialogOpen, setDialogOpen] = useState(false); const [editing, setEditing] = useState(null); const [form, setForm] = useState(empty); const [saving, setSaving] = useState(false);
+  const empty = { username: '', displayName: '', password: '', role: 'RECEPTIONIST', active: true, permissions: roleDefaultPermissions.RECEPTIONIST };
+  const [users, setUsers] = useState([]);
+  const [query, setQuery] = useState('');
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState(empty);
+  const [saving, setSaving] = useState(false);
   const load = useCallback(() => userApi.list().then(setUsers).catch(error => notify(error.message, 'error')), [notify]);
   useEffect(() => { load(); }, [load]);
   const filtered = useMemo(() => users.filter(user => `${user.displayName} ${user.username} ${user.role}`.toLowerCase().includes(query.toLowerCase())), [users, query]);
-  const open = user => { setEditing(user || null); setForm(user ? { ...user, password: '', permissions: user.permissions || [] } : empty); setDialogOpen(true); };
-  const submit = async event => { event.preventDefault(); setSaving(true); try { const body = { ...form, password: form.password || (editing ? null : '') }; if (editing) await userApi.update(editing.id, body); else await userApi.create(body); notify(`User ${editing ? 'updated' : 'created'} successfully`, 'success'); setDialogOpen(false); await load(); } catch (error) { notify(error.message, 'error'); } finally { setSaving(false); } };
-  return <><SectionHeader eyebrow="Access control" title="Manage users" description="Create staff accounts, assign application roles and control account status." action={() => open(null)} actionLabel="Add user"/><div className="admin-toolbar"><label><Icon name="search"/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search user, email or role"/></label><span>{filtered.length} users</span></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>User</th><th>Username</th><th>Role</th><th>Permissions</th><th>Status</th><th/></tr></thead><tbody>{filtered.length ? filtered.map(user => <tr key={user.id}><td><div className="admin-person user"><span>{user.initials || initials(user.displayName)}</span><div><b>{user.displayName}</b><small>{user.id === currentUser?.id ? 'Current account' : `User #${user.id}`}</small></div></div></td><td>{user.username}</td><td><span className="role-pill">{roleLabel(user.role)}</span></td><td>{user.permissions?.length || 0} assigned</td><td><StatusBadge active={user.active}/></td><td><button className="admin-edit" onClick={() => open(user)}>Edit</button></td></tr>) : <tr><td colSpan="6" className="admin-empty">No users found</td></tr>}</tbody></table></div>{dialogOpen && <AdminDialog title={editing ? 'Edit user' : 'Add user'} subtitle="Configure secure staff access and application role" icon="lock" onClose={() => setDialogOpen(false)} onSubmit={submit} saving={saving} submitLabel={editing ? 'Update user' : 'Create user'}><div className="admin-form-grid"><label><span>Display name *</span><input required value={form.displayName} onChange={e => setForm({ ...form, displayName: e.target.value })} placeholder="Staff member name"/></label><label><span>Username / email *</span><input required value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} placeholder="user@medora.in"/></label><label><span>{editing ? 'New password' : 'Password *'}</span><input required={!editing} minLength="6" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder={editing ? 'Leave blank to keep current' : 'Minimum 6 characters'}/></label><label><span>Role *</span><select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>{roles.map(role => <option key={role} value={role}>{roleLabel(role)}</option>)}</select></label><label><span>Status</span><select value={String(form.active)} onChange={e => setForm({ ...form, active: e.target.value === 'true' })}><option value="true">Active</option><option value="false">Inactive</option></select></label></div>{editing?.id === currentUser?.id && <p className="admin-form-note warning">You are editing your currently signed-in administrator account.</p>}</AdminDialog>}</>;
+  const open = user => {
+    setEditing(user || null);
+    setForm(user
+      ? { ...user, password: '', permissions: effectiveModulePermissions(user) }
+      : { ...empty, permissions: [...empty.permissions] });
+    setDialogOpen(true);
+  };
+  const changeRole = role => setForm(current => ({
+    ...current,
+    role,
+    permissions: [...(roleDefaultPermissions[role] || [])],
+  }));
+  const toggleModule = permission => setForm(current => ({
+    ...current,
+    permissions: current.permissions.includes(permission)
+      ? current.permissions.filter(item => item !== permission)
+      : [...current.permissions, permission],
+  }));
+  const submit = async event => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const permissions = form.role === 'ADMINISTRATOR'
+        ? roleDefaultPermissions.ADMINISTRATOR
+        : permissionsForSubmission(form.permissions);
+      const body = { ...form, permissions, password: form.password || (editing ? null : '') };
+      if (editing) await userApi.update(editing.id, body);
+      else await userApi.create(body);
+      notify(`User ${editing ? 'updated' : 'created'} successfully`, 'success');
+      setDialogOpen(false);
+      await load();
+    } catch (error) {
+      notify(error.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return <>
+    <SectionHeader eyebrow="Access control" title="Manage users" description="Create staff accounts and allocate only the modules each person may use." action={() => open(null)} actionLabel="Add user"/>
+    <div className="admin-toolbar"><label><Icon name="search"/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search user, email or role"/></label><span>{filtered.length} users</span></div>
+    <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>User</th><th>Username</th><th>Role</th><th>Module access</th><th>Status</th><th/></tr></thead><tbody>{filtered.length ? filtered.map(user => {
+      const access = effectiveModulePermissions(user);
+      return <tr key={user.id}><td><div className="admin-person user"><span>{user.initials || initials(user.displayName)}</span><div><b>{user.displayName}</b><small>{user.id === currentUser?.id ? 'Current account' : `User #${user.id}`}</small></div></div></td><td>{user.username}</td><td><span className="role-pill">{roleLabel(user.role)}</span></td><td>{access.length ? access.map(permission => modules.find(module => module.permission === permission)?.id.toUpperCase()).join(', ') : 'No modules'}</td><td><StatusBadge active={user.active}/></td><td><button className="admin-edit" onClick={() => open(user)}>Edit</button></td></tr>;
+    }) : <tr><td colSpan="6" className="admin-empty">No users found</td></tr>}</tbody></table></div>
+    {dialogOpen && <AdminDialog title={editing ? 'Edit user' : 'Add user'} subtitle="Configure the account and allocate module access" icon="lock" onClose={() => setDialogOpen(false)} onSubmit={submit} saving={saving} submitLabel={editing ? 'Update user' : 'Create user'}>
+      <div className="admin-form-grid">
+        <label><span>Display name *</span><input required value={form.displayName} onChange={e => setForm({ ...form, displayName: e.target.value })} placeholder="Staff member name"/></label>
+        <label><span>Username / email *</span><input required value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} placeholder="user@medora.in"/></label>
+        <label><span>{editing ? 'New password' : 'Password *'}</span><input required={!editing} minLength="6" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder={editing ? 'Leave blank to keep current' : 'Minimum 6 characters'}/></label>
+        <label><span>Role *</span><select value={form.role} onChange={e => changeRole(e.target.value)}>{roles.map(role => <option key={role} value={role}>{roleLabel(role)}</option>)}</select></label>
+        <label><span>Status</span><select value={String(form.active)} onChange={e => setForm({ ...form, active: e.target.value === 'true' })}><option value="true">Active</option><option value="false">Inactive</option></select></label>
+      </div>
+      <fieldset className="module-access-fieldset">
+        <legend>Allocated modules</legend>
+        <p>Only selected modules will appear after this user signs in.</p>
+        <div>{modules.map(module => <label key={module.permission}><input type="checkbox" checked={form.role === 'ADMINISTRATOR' || form.permissions.includes(module.permission)} disabled={form.role === 'ADMINISTRATOR'} onChange={() => toggleModule(module.permission)}/><span><b>{module.label}</b><small>{module.id.toUpperCase()} module</small></span></label>)}</div>
+      </fieldset>
+      {editing?.id === currentUser?.id && <p className="admin-form-note warning">You are editing your currently signed-in administrator account.</p>}
+    </AdminDialog>}
+  </>;
 }
 
 export function AdminConfiguration({ currentUser }) {
@@ -285,5 +381,5 @@ export function AdminConfiguration({ currentUser }) {
   const [message, setMessage] = useState(null);
   const notify = useCallback((text, type) => { setMessage({ text, type }); window.clearTimeout(window.__adminMessageTimer); window.__adminMessageTimer = window.setTimeout(() => setMessage(null), 4500); }, []);
   const panelProps = { notify, currentUser };
-  return <div className="admin-page"><div className="admin-overview"><div><span>ADMIN CONTROL CENTER</span><h2>Hospital configuration</h2><p>Manage clinical masters, patient records, diagnostics pricing, pharmacy inventory and staff access from one secure workspace.</p></div><div className="admin-security"><Icon name="lock"/><div><b>Administrator access</b><small>Changes are protected and recorded by the backend</small></div></div></div><div className="admin-layout"><aside className="admin-tabs">{tabs.map(tab => <button key={tab.id} className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><span><Icon name={tab.icon}/></span><div><b>{tab.label}</b><small>{tab.description}</small></div><Icon name="chevron" size={15}/></button>)}</aside><section className="admin-panel">{message && <div className={`api-message ${message.type}`}>{message.text}</div>}{activeTab === 'doctors' && <DoctorsPanel {...panelProps}/>} {activeTab === 'patients' && <PatientsPanel {...panelProps}/>} {activeTab === 'lab' && <LabTestsPanel {...panelProps}/>} {activeTab === 'medicines' && <MedicinesPanel {...panelProps}/>} {activeTab === 'users' && <UsersPanel {...panelProps}/>}</section></div></div>;
+  return <div className="admin-page"><div className="admin-overview"><div><span>ADMIN CONTROL CENTER</span><h2>Hospital configuration</h2><p>Manage clinical masters, patient records, diagnostics pricing, pharmacy inventory and staff access from one secure workspace.</p></div><div className="admin-security"><Icon name="lock"/><div><b>Administrator access</b><small>Changes are protected and recorded by the backend</small></div></div></div><div className="admin-layout"><aside className="admin-tabs">{tabs.map(tab => <button key={tab.id} className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><span><Icon name={tab.icon}/></span><div><b>{tab.label}</b><small>{tab.description}</small></div><Icon name="chevron" size={15}/></button>)}</aside><section className="admin-panel">{message && <div className={`api-message ${message.type}`}>{message.text}</div>}{activeTab === 'doctors' && <DoctorsPanel {...panelProps}/>} {activeTab === 'patients' && <PatientsPanel {...panelProps}/>} {activeTab === 'lab' && <LabTestsPanel {...panelProps}/>} {activeTab === 'medicines' && <MedicinesPanel {...panelProps}/>} {activeTab === 'ipdCharges' && <IpdChargesPanel {...panelProps}/>} {activeTab === 'users' && <UsersPanel {...panelProps}/>}</section></div></div>;
 }

@@ -114,14 +114,13 @@ export function PharmacyBilling() {
   </div><PharmacyReceipt invoice={invoice}/></>;
 }
 
-function PharmacyReceipt({ invoice }) {
+export function PharmacyReceipt({ invoice }) {
   if (!invoice) return null;
   return <article className="print-receipt pharmacy-print">
     <HospitalPrintHeader/>
     <div className="receipt-title">PHARMACY TAX INVOICE</div>
-    <section className="receipt-details"><div><p><b>Invoice:</b> {invoice.invoiceNumber}</p><p><b>Customer:</b> {invoice.customerName}</p><p><b>UHID:</b> {invoice.patient?.uhid || 'Walk-in'}</p><p><b>Mobile:</b> {invoice.customerMobile || '—'}</p></div><div><p><b>Date:</b> {new Date(invoice.createdAt).toLocaleString('en-IN')}</p><p><b>Payment mode:</b> {invoice.paymentMode}</p><p><b>Payment status:</b> {invoice.paymentStatus}</p></div></section>
+    <section className="receipt-details"><div><p><b>Invoice:</b> {invoice.invoiceNumber}</p><p><b>Customer:</b> {invoice.customerName}</p><p><b>UHID:</b> {invoice.patient?.uhid || 'Walk-in'}</p><p><b>Mobile:</b> {invoice.customerMobile || '—'}</p></div><div><p><b>Date:</b> {new Date(invoice.createdAt).toLocaleString('en-IN')}</p></div></section>
     <table className="receipt-table"><thead><tr><th>#</th><th>Medicine / Batch</th><th>Qty × Rate</th><th>Tax</th><th>Amount (₹)</th></tr></thead><tbody>{invoice.items.map((item, index) => <tr key={`${item.medicineId}-${index}`}><td>{index + 1}</td><td><b>{item.medicineName}</b><small>{item.manufacturerCode} · Batch {item.batchNumber || '—'} · Exp {item.expiryDate}</small></td><td>{item.quantity} × {Number(item.unitPrice).toFixed(2)}</td><td>{Number(item.taxAmount).toFixed(2)}</td><td>{Number(item.lineTotal).toFixed(2)}</td></tr>)}<tr><td colSpan="4">Discount</td><td>− {Number(invoice.discount).toFixed(2)}</td></tr><tr className="receipt-total"><td colSpan="4">Paid Amount</td><td>₹{Number(invoice.paidAmount).toFixed(2)}</td></tr></tbody></table>
     <div className="receipt-paid-note">Received with thanks <b>{formatMoney(invoice.paidAmount)}</b> from <b>{invoice.customerName}</b>.</div>
-    <footer className="receipt-footer"><div><p>Medicines once sold are subject to the hospital pharmacy return policy.</p><p>Please check batch and expiry before leaving the counter.</p></div><div className="signature">Pharmacist Signature</div></footer>
   </article>;
 }

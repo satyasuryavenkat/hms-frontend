@@ -5,7 +5,12 @@ const API_BASE_URL = (process.env.REACT_APP_API_BASE_URL || '/api/v1').replace(/
 
 const ACCESS_TOKEN_KEY = 'medora-access-token';
 const REFRESH_TOKEN_KEY = 'medora-refresh-token';
+export const API_SUCCESS_EVENT = 'hms:api-success';
+export const SESSION_EXPIRED_EVENT = 'hms:session-expired';
 let refreshRequest = null;
+let sessionExpiredNotified = false;
+let sessionRestoreRequest = null;
+let restoreSession = null;
 
 export class ApiError extends Error {
   constructor(message, status, errors) {
@@ -22,12 +27,30 @@ export const tokenStore = {
   set: ({ accessToken, refreshToken }) => {
     sessionStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
     sessionStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+    sessionExpiredNotified = false;
+    if (restoreSession) restoreSession();
+    sessionRestoreRequest = null;
+    restoreSession = null;
   },
   clear: () => {
     sessionStorage.removeItem(ACCESS_TOKEN_KEY);
     sessionStorage.removeItem(REFRESH_TOKEN_KEY);
   },
 };
+
+function notifySessionExpired(message = 'For your security, your session has expired. Sign in again to continue without losing the information already entered in this form.') {
+  tokenStore.clear();
+  if (sessionExpiredNotified) return;
+  sessionExpiredNotified = true;
+  window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT, { detail: { message } }));
+}
+
+function waitForSessionRestore() {
+  if (!sessionRestoreRequest) {
+    sessionRestoreRequest = new Promise(resolve => { restoreSession = resolve; });
+  }
+  return sessionRestoreRequest;
+}
 
 function buildUrl(path, query) {
   const endpoint = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
@@ -57,7 +80,7 @@ async function refreshAccessToken() {
 }
 
 export async function apiRequest(path, options = {}) {
-  const { query, body, auth = true, retry = true, headers = {}, responseType = 'json' } = options;
+  const { query, body, auth = true, retry = true, headers = {}, responseType = 'json', notifySuccess = true } = options;
   const requestHeaders = { ...headers };
   if (body !== undefined) requestHeaders['Content-Type'] = 'application/json';
   if (auth && tokenStore.getAccess()) requestHeaders.Authorization = `Bearer ${tokenStore.getAccess()}`;
@@ -67,8 +90,19 @@ export async function apiRequest(path, options = {}) {
     body: body === undefined ? undefined : JSON.stringify(body),
   }).catch(() => { throw new ApiError(`Cannot connect to the HMS backend through ${API_BASE_URL}`, 0); });
 
-  if (response.status === 401 && auth && retry && tokenStore.getRefresh()) {
-    await refreshAccessToken();
+  if (response.status === 401 && auth && retry) {
+    if (tokenStore.getRefresh()) {
+      try {
+        await refreshAccessToken();
+        return apiRequest(path, { ...options, retry: false });
+      } catch {
+        notifySessionExpired();
+        await waitForSessionRestore();
+        return apiRequest(path, { ...options, retry: false });
+      }
+    }
+    notifySessionExpired();
+    await waitForSessionRestore();
     return apiRequest(path, { ...options, retry: false });
   }
   if (responseType === 'blob') {
@@ -77,8 +111,15 @@ export async function apiRequest(path, options = {}) {
   }
   const payload = await response.json().catch(() => null);
   if (!response.ok || !payload?.success) {
+    if (response.status === 401 && auth) notifySessionExpired(payload?.message);
     const validationMessage = payload?.errors ? Object.values(payload.errors)[0] : null;
     throw new ApiError(validationMessage || payload?.message || `Request failed (${response.status})`, response.status, payload?.errors);
+  }
+  const method = (options.method || 'GET').toUpperCase();
+  if (notifySuccess && method !== 'GET' && !path.startsWith('/auth/')) {
+    window.dispatchEvent(new CustomEvent(API_SUCCESS_EVENT, {
+      detail: { message: payload.message || 'Saved successfully.' },
+    }));
   }
   return payload.data;
 }

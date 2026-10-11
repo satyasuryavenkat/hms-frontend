@@ -1,5 +1,30 @@
 import { buildLabReportHtml, buildLabTestTemplatePreviewHtml } from './LabReportEditor';
 
+test.each([false, true])('saved report templates keep one footer after repeated draft previews (Quill: %s)', quillFormat => {
+  const test = { code: 'HB', name: 'Haemoglobin', department: 'Hematology',
+    results: [{ parameterId: '1', name: 'Haemoglobin', parameterType: 'NUMERIC', result: '12.4' }] };
+  let template = buildLabReportHtml({ order: { tests: [test] } });
+  if (quillFormat) template = template.replace('<div class="lab-report-signature" style="text-align: right;">', '<p class="ql-align-right">').replace('</div>', '</p>');
+  for (let save = 0; save < 3; save += 1) {
+    template = buildLabReportHtml({
+      order: { tests: [{ ...test, reportTemplateHtml: template }] },
+      results: { 1: { result: '14.2' } }, signatureDesignation: 'CONSULTANT_PATHOLOGIST',
+    });
+    expect(template.match(/End of Report/g)).toHaveLength(1);
+    expect(template.match(/Consultant Pathologist/g)).toHaveLength(1);
+    expect(template).not.toContain('Lab Incharge');
+    expect(template).toContain('14.2');
+  }
+});
+
+test('combining saved test templates adds only one report footer and preserves clinical notes', () => {
+  const template = '<h3>DEPARTMENT OF LABORATORY</h3><p>Clinical note: discuss with consultant pathologist.</p><p><strong>— End of Report —</strong></p><p>Lab Incharge</p><p>— End of Report —</p><p>Lab Incharge</p>';
+  const html = buildLabReportHtml({ order: { tests: [{ reportTemplateHtml: template }, { reportTemplateHtml: template }] } });
+  expect(html.match(/End of Report/g)).toHaveLength(1);
+  expect(html.match(/Lab Incharge/g)).toHaveLength(1);
+  expect(html.match(/Clinical note:/g)).toHaveLength(2);
+});
+
 test('builds a content-only professional lab report for preprinted stationery', () => {
   const html = buildLabReportHtml({
     order: {
@@ -25,18 +50,29 @@ test('builds a content-only professional lab report for preprinted stationery', 
     remarks: 'Within normal limits.',
   });
 
-  expect(html).toContain('LABORATORY INVESTIGATION REPORT');
+  expect(html).not.toContain('LABORATORY INVESTIGATION REPORT');
   expect(html).toContain('DEPARTMENT OF HEMATOLOGY');
   expect(html).toContain('NORMAL INTERVAL');
   expect(html).not.toContain('BIOLOGICAL REFERENCE INTERVAL');
   expect(html).toContain('DIFFERENTIAL COUNT');
   expect(html).toContain('13.5');
-  expect(html).toContain('<td>RBC Morphology</td><td><strong>:</strong></td><td><p style="text-align: left;">');
+  expect(html).toContain('<p class="report-text-observation-line"><strong>RBC Morphology</strong><code>:</code><strong>—</strong></p>');
   expect(html).not.toContain('must-not-render');
   expect(html.match(/<strong>INVESTIGATION<\/strong>/g)).toHaveLength(1);
-  expect(html).toContain('Consultant Pathologist');
+  expect(html).not.toContain('Digitally signed');
+  expect(html).toContain('<strong>Lab Incharge</strong>');
   expect(html).not.toContain('Lakshmi Sreenivaasa');
   expect(html).not.toContain('receipt-hospital-header');
+});
+
+test('uses the selected consultant pathologist signature designation', () => {
+  const html = buildLabReportHtml({
+    order: { patient: {}, tests: [] },
+    signatureDesignation: 'CONSULTANT_PATHOLOGIST',
+  });
+
+  expect(html).toContain('<strong>Consultant Pathologist</strong>');
+  expect(html).not.toContain('<strong>Lab Incharge</strong>');
 });
 
 test('builds a reusable sample preview from an admin lab-test template', () => {
@@ -90,4 +126,23 @@ test('keeps Quill colon cells in the same row when a saved template is reopened'
 
   expect((reopened.match(/data-row="value"/g) || [])).toHaveLength(5);
   expect((reopened.match(/<td data-row="value">:<\/td>/g) || [])).toHaveLength(1);
+});
+
+test('uses the remaining report width for text observations in saved templates', () => {
+  const html = buildLabReportHtml({
+    order: {
+      patient: { name: 'Text Patient', uhid: 'UHID-03', age: 28, gender: 'FEMALE' },
+      tests: [{
+        code: 'SMEAR',
+        name: 'Peripheral Smear',
+        department: 'Hematology',
+        reportTemplateHtml: '<h3>DEPARTMENT OF HEMATOLOGY</h3><table><tbody><tr><td><strong>INVESTIGATION</strong></td><td><strong>RESULT</strong></td><td><strong>UNIT</strong></td><td><strong>NORMAL INTERVAL</strong></td></tr><tr><td>RBC Morphology</td><td>Sample observation</td><td></td><td></td></tr></tbody></table><blockquote>Remarks</blockquote>',
+        results: [{ parameterId: '301', name: 'RBC Morphology', parameterType: 'TEXT' }],
+      }],
+    },
+    results: { 301: { result: 'Normocytic normochromic cells with no abnormal morphology seen.' } },
+  });
+
+  expect(html).toContain('class="report-text-observation-line"');
+  expect(html).toContain('Normocytic normochromic cells with no abnormal morphology seen.');
 });

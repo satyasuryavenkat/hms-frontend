@@ -17,6 +17,12 @@ const normalizeTemplateLayout = html => {
   const labeledHtml = normalizeTemplateLabels(html);
   if (typeof DOMParser === 'undefined') return labeledHtml;
   const document = new DOMParser().parseFromString(labeledHtml, 'text/html');
+  document.body.querySelectorAll('h1').forEach(heading => {
+    if (heading.textContent.trim().toUpperCase() === 'LABORATORY INVESTIGATION REPORT') heading.remove();
+  });
+  document.body.querySelectorAll('blockquote').forEach(block => {
+    if (block.textContent.trim().toUpperCase().startsWith('PATHOLOGIST REMARKS')) block.remove();
+  });
   document.body.querySelectorAll('table').forEach((table, tableIndex) => {
     const rows = [...table.querySelectorAll('tr')];
     const headerCells = rows[0]?.querySelectorAll(':scope > td');
@@ -43,6 +49,65 @@ const normalizeTemplateLayout = html => {
   return document.body.innerHTML;
 };
 
+export const restoreTextResultRows = (editorRoot, sourceHtml) => {
+  if (!editorRoot || typeof DOMParser === 'undefined') return;
+  const source = new DOMParser().parseFromString(String(sourceHtml || ''), 'text/html');
+  const textLabels = new Set([...source.body.querySelectorAll('p.report-text-observation-line')]
+    .map(line => line.querySelector('strong')?.textContent.trim().toLowerCase())
+    .filter(Boolean));
+  if (!textLabels.size) return;
+  editorRoot.querySelectorAll('p').forEach(line => {
+    const label = line.querySelector('strong')?.textContent.trim().toLowerCase();
+    if (textLabels.has(label)) line.classList.add('report-text-observation-line');
+  });
+};
+
+export const separateTextResultRows = html => {
+  if (typeof DOMParser === 'undefined') return String(html || '');
+  const document = new DOMParser().parseFromString(String(html || ''), 'text/html');
+  [...document.body.querySelectorAll('tr.report-text-row')].forEach(row => {
+    const table = row.closest('table');
+    if (!table) return;
+
+    const afterTable = table.cloneNode(false);
+    const afterBody = document.createElement('tbody');
+    afterTable.appendChild(afterBody);
+    let followingRow = row.nextElementSibling;
+    while (followingRow) {
+      const nextRow = followingRow.nextElementSibling;
+      afterBody.appendChild(followingRow);
+      followingRow = nextRow;
+    }
+
+    const cells = [...row.querySelectorAll(':scope > td')];
+    const line = document.createElement('p');
+    line.className = 'report-text-observation-line';
+    const label = document.createElement('strong');
+    label.textContent = cells[0]?.textContent.trim() || '';
+    const colon = document.createElement('code');
+    colon.textContent = ':';
+    const value = document.createElement('strong');
+    value.textContent = cells[2]?.textContent.trim() || cells[1]?.textContent.trim() || 'â€”';
+    line.append(label, colon, value);
+    row.remove();
+
+    table.insertAdjacentElement('afterend', line);
+    if (afterBody.children.length) line.insertAdjacentElement('afterend', afterTable);
+    if (!table.querySelector('tr')) table.remove();
+  });
+
+  [...document.body.querySelectorAll('table.report-text-observation-table')].forEach(table => {
+    const row = table.querySelector('tr');
+    if (!row) return;
+    row.classList.add('report-text-row');
+    table.classList.remove('report-text-observation-table');
+  });
+  if (document.body.querySelector('tr.report-text-row')) {
+    return separateTextResultRows(document.body.innerHTML);
+  }
+  return document.body.innerHTML;
+};
+
 const renderSavedTestSection = (test, results) => {
   if (!test?.reportTemplateHtml || typeof DOMParser === 'undefined') return '';
   const document = new DOMParser().parseFromString(normalizeTemplateLayout(test.reportTemplateHtml), 'text/html');
@@ -56,6 +121,17 @@ const renderSavedTestSection = (test, results) => {
     container.appendChild(node.cloneNode(true));
     node = node.nextElementSibling;
   }
+
+  // Saved master previews include a footer. Quill can turn its signature div
+  // into an unmarked paragraph, so recognize both forms before adding the
+  // current report's single footer and selected signature below.
+  container.querySelectorAll('.lab-report-signature').forEach(footer => footer.remove());
+  container.querySelectorAll('p, div').forEach(block => {
+    if (block.querySelector('table, p, div')) return;
+    const label = block.textContent.replace(/[\s\u00a0]+/g, ' ').trim();
+    if (/^[\s—–\-*]*end of report[\s—–\-*]*$/i.test(label)
+      || /^(lab incharge|consultant pathologist)$/i.test(label)) block.remove();
+  });
 
   const parameters = (test.results || test.parameters || [])
     .filter(parameter => parameter.parameterType !== 'HEADING');
@@ -75,6 +151,17 @@ const renderSavedTestSection = (test, results) => {
     const value = entered.result || parameter.result || '—';
     const abnormal = entered.abnormal ?? parameter.abnormal;
     const resultCell = cells[1]?.textContent.trim() === ':' ? cells[2] : cells[1];
+    if (parameter.parameterType === 'TEXT') {
+      row.classList.add('report-text-row');
+      const trailingCells = [];
+      let trailingCell = resultCell.nextElementSibling;
+      while (trailingCell) {
+        trailingCells.push(trailingCell);
+        trailingCell = trailingCell.nextElementSibling;
+      }
+      resultCell.colSpan = 1 + trailingCells.length;
+      trailingCells.forEach(cell => cell.remove());
+    }
     resultCell.innerHTML = abnormal
       ? `<span style="color: rgb(166, 29, 29);"><strong>${safe(value)} *</strong></span>`
       : `<strong>${safe(value)}</strong>`;
@@ -97,7 +184,7 @@ const resultTable = (test, results) => {
     const result = entered.result || item.result || '—';
     const abnormal = entered.abnormal ?? item.abnormal;
     if (item.parameterType === 'TEXT') {
-      rows += `<tr class="report-text-row"><td>${safe(item.name)}</td><td><strong>:</strong></td><td><p style="text-align: left;">${safe(result)}</p></td><td></td><td></td></tr>`;
+      rows += `<tr class="report-text-row"><td>${safe(item.name)}</td><td><strong>:</strong></td><td colspan="3"><p style="text-align: left;">${safe(result)}</p></td></tr>`;
       return;
     }
     rows += `<tr>
@@ -108,40 +195,34 @@ const resultTable = (test, results) => {
       <td>${safe(item.referenceRange || '—')}</td>
     </tr>`;
   });
-  const parameterNotes = (test.results || []).map(item => {
-    const note = results[item.parameterId]?.remarks || item.remarks;
-    return note ? `${safe(item.name)}: ${safe(note)}` : '';
-  }).filter(Boolean).join(' · ');
-
   return `<h3 style="text-align: center;">DEPARTMENT OF ${safe(test.department || 'LABORATORY').toUpperCase()}</h3>
     <h2 style="text-align: center;">${safe(test.name).toUpperCase()}</h2>
     <p style="text-align: center;"><em>${safe(test.code)} · ${safe(test.specimenType || 'SPECIMEN')}</em></p>
     <table><tbody>${tableHeader}${rows || '<tr><td>General Result</td><td><strong>:</strong></td><td>—</td><td>—</td><td>—</td></tr>'}</tbody></table>
-    ${parameterNotes ? `<p><strong>Parameter notes:</strong> ${parameterNotes}</p>` : ''}
     `;
 };
 
-export function buildLabReportHtml({ order, results = {}, remarks = '' }) {
+export function buildLabReportHtml({ order, results = {}, signatureDesignation = null }) {
   const patient = order?.patient || {};
   const collectedAt = order?.specimens?.[0]?.createdAt || order?.createdAt;
   const reportSections = (order?.tests || []).map(test => resultTable(test, results)).join('');
+  const signatureText = (signatureDesignation || order?.signatureDesignation) === 'CONSULTANT_PATHOLOGIST'
+    ? 'Consultant Pathologist'
+    : 'Lab Incharge';
 
-  return `<h1 style="text-align: center;">LABORATORY INVESTIGATION REPORT</h1>
-    <table><tbody>
+  return separateTextResultRows(`<table><tbody>
       <tr><td><strong>Patient Name</strong></td><td>${safe(patient.name || '—')}</td><td><strong>Lab No.</strong></td><td>${safe(order?.orderNumber || '—')}</td></tr>
       <tr><td><strong>Age / Sex</strong></td><td>${safe(patient.age ?? '—')} Years / ${safe(patient.gender || '—')}</td><td><strong>UHID</strong></td><td>${safe(patient.uhid || '—')}</td></tr>
       <tr><td><strong>Referred By</strong></td><td>${safe(order?.referringDoctor?.name || 'Self referral')}</td><td><strong>Collected On</strong></td><td>${safe(displayDate(collectedAt))}</td></tr>
       <tr><td><strong>Priority</strong></td><td>${safe(order?.priority || 'ROUTINE')}</td><td><strong>Reported On</strong></td><td>${safe(displayDate(new Date()))}</td></tr>
     </tbody></table>
     ${reportSections}
-    <blockquote><strong>PATHOLOGIST REMARKS</strong><br>${safe(remarks || 'No additional remarks.')}</blockquote>
     <p style="text-align: center;"><strong>— End of Report —</strong></p>
-    <p><br></p><p><br></p>
-    <p style="text-align: right;"><strong>Consultant Pathologist</strong><br>Authorized Signatory</p>`;
+    <div class="lab-report-signature" style="text-align: right;"><strong>${signatureText}</strong></div>`);
 }
 
 export function buildLabTestTemplatePreviewHtml(test) {
-  if (test?.reportTemplateHtml) return normalizeTemplateLayout(test.reportTemplateHtml);
+  if (test?.reportTemplateHtml) return separateTextResultRows(normalizeTemplateLayout(test.reportTemplateHtml));
   const parameters = (test?.parameters || []).map((parameter, index) => ({
     ...parameter,
     parameterId: parameter.parameterId || `sample-${index}`,
@@ -152,7 +233,6 @@ export function buildLabTestTemplatePreviewHtml(test) {
     .filter(parameter => parameter.parameterType !== 'HEADING')
     .map(parameter => [parameter.parameterId, {
       result: parameter.parameterType === 'TEXT' ? 'Sample observation' : '00.0',
-      remarks: '',
       abnormal: false,
     }]));
 
@@ -173,7 +253,6 @@ export function buildLabTestTemplatePreviewHtml(test) {
       }],
     },
     results,
-    remarks: 'Sample template preview — patient values will replace the placeholders.',
   });
 }
 
@@ -185,7 +264,7 @@ const newInvestigationHtml = `<p><br></p>
     <tr><td>Test parameter</td><td><strong>:</strong></td><td>Enter result</td><td>Unit</td><td>Reference interval</td></tr>
   </tbody></table><p><br></p>`;
 
-export function LabReportEditorDialog({ initialHtml, resetHtml, onClose, onPrint, onSave, title = 'Review laboratory report', subtitle = 'Edit the exact content that will be printed on hospital letterhead.', saveLabel = 'Save template' }) {
+export function LabReportEditorDialog({ initialHtml, resetHtml, onClose, onPrint, onSave, title = 'Review laboratory report', subtitle = 'Edit the exact content below, then print it or choose Save as PDF in the Windows print dialog.', saveLabel = 'Save template', printLabel = 'Print / Save as PDF' }) {
   const editorNode = useRef(null);
   const quill = useRef(null);
   const [ready, setReady] = useState(false);
@@ -211,6 +290,7 @@ export function LabReportEditorDialog({ initialHtml, resetHtml, onClose, onPrint
         },
       });
       instance.clipboard.dangerouslyPasteHTML(initialHtml);
+      restoreTextResultRows(instance.root, initialHtml);
       quill.current = instance;
       setReady(true);
     });
@@ -287,7 +367,7 @@ export function LabReportEditorDialog({ initialHtml, resetHtml, onClose, onPrint
       <footer className="report-editor-actions">
         <div><Icon name="info" size={16}/><span>The logo and hospital-address header are intentionally omitted for preprinted paper.</span></div>
         <button type="button" className="secondary" onClick={onClose}>Cancel</button>
-        {onPrint && <button type="button" className="primary" disabled={!ready} onClick={print}><Icon name="print" size={16}/> Print this version</button>}
+        {onPrint && <button type="button" className="primary" disabled={!ready} onClick={print}><Icon name="print" size={16}/> {printLabel}</button>}
         {onSave && <button type="button" className="primary" disabled={!ready} onClick={saveTemplate}><Icon name="check" size={16}/> {saveLabel}</button>}
       </footer>
     </section>

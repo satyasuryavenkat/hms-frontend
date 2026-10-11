@@ -7,17 +7,19 @@ import { doctorApi, opApi, patientApi } from '../api/services';
 import { usePatientSearch } from '../hooks/usePatientSearch';
 import { formatMoney } from '../data/hospitalData';
 
-const emptyPatient = { id: null, uhid: '', name: '', mobile: '', dateOfBirth: '', gender: '', address: '' };
+const emptyPatient = { id: null, uhid: '', name: '', mobile: '', age: '', gender: '', address: '' };
 const today = () => new Date().toLocaleDateString('en-CA');
-
-function calculateAge(dateOfBirth) {
-  if (!dateOfBirth) return '';
-  const [year, month, day] = dateOfBirth.split('-').map(Number);
+export const currentSystemTime = () => {
   const now = new Date();
-  let age = now.getFullYear() - year;
-  if (now.getMonth() + 1 < month || (now.getMonth() + 1 === month && now.getDate() < day)) age -= 1;
-  return age >= 0 ? age : '';
-}
+  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+};
+export const opValidityDate = appointmentDate => {
+  const [year, month, day] = String(appointmentDate || '').split('-').map(Number);
+  if (!year || !month || !day) return '—';
+  const validTill = new Date(year, month - 1, day);
+  validTill.setDate(validTill.getDate() + 5);
+  return validTill.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+};
 
 export function OPBilling({ selectedPatient }) {
   const [patient, setPatient] = useState(emptyPatient);
@@ -27,7 +29,7 @@ export function OPBilling({ selectedPatient }) {
   const [doctorId, setDoctorId] = useState('');
   const [visitType, setVisitType] = useState('NEW_CONSULTATION');
   const [appointmentDate, setAppointmentDate] = useState(today());
-  const [appointmentTime, setAppointmentTime] = useState('10:30');
+  const [appointmentTime, setAppointmentTime] = useState(currentSystemTime);
   const [symptoms, setSymptoms] = useState('');
   const [consultation, setConsultation] = useState(0);
   const [discount, setDiscount] = useState(0);
@@ -56,7 +58,7 @@ export function OPBilling({ selectedPatient }) {
   }, [selectedPatient]);
 
   const total = useMemo(() => Math.max(0, Number(consultation || 0) - Number(discount || 0)), [consultation, discount]);
-  const age = useMemo(() => calculateAge(patient.dateOfBirth), [patient.dateOfBirth]);
+  const age = patient.age;
   const clearFieldError = field => setFieldErrors(current => {
     if (!current[field]) return current;
     const next = { ...current };
@@ -81,7 +83,8 @@ export function OPBilling({ selectedPatient }) {
     if (!patient.name.trim()) errors.name = 'Enter the patient name.';
     if (!mobile) errors.mobile = 'Enter the mobile number.';
     else if (!/^\d{10,15}$/.test(mobile)) errors.mobile = 'Enter a valid 10 to 15 digit mobile number.';
-    if (!patient.dateOfBirth) errors.dateOfBirth = 'Select the date of birth.';
+    if (patient.age === '' || patient.age === null || patient.age === undefined) errors.age = 'Enter the patient age.';
+    else if (!Number.isInteger(Number(patient.age)) || Number(patient.age) < 0 || Number(patient.age) > 130) errors.age = 'Age must be a whole number between 0 and 130.';
     if (!patient.gender) errors.gender = 'Select the patient gender.';
     if (!doctorId) errors.doctorId = 'Select a consulting doctor.';
     if (!visitType) errors.visitType = 'Select a visit type.';
@@ -102,7 +105,7 @@ export function OPBilling({ selectedPatient }) {
     setSubmitting(true);
     setMessage({ type: '', text: '' });
     try {
-      const patientBody = { name: patient.name.trim(), mobile, dateOfBirth: patient.dateOfBirth, gender: patient.gender, address: patient.address };
+      const patientBody = { name: patient.name.trim(), mobile, age: Number(patient.age), gender: patient.gender, address: patient.address };
       const persistedPatient = patient.id ? await patientApi.update(patient.id, patientBody) : await patientApi.create(patientBody);
       setPatient(persistedPatient);
       const createdVisit = await opApi.create({ patientId: persistedPatient.id, doctorId: Number(doctorId), visitType, appointmentDate, appointmentTime, symptoms, consultationFee: Number(consultation), discount: Number(discount), paymentMode });
@@ -129,8 +132,8 @@ export function OPBilling({ selectedPatient }) {
         <FormField label="Mobile number" required><div className={`input-prefix ${fieldErrors.mobile ? 'invalid' : ''}`}><span>+91</span><input id="op-mobile" aria-label="Mobile number" aria-invalid={Boolean(fieldErrors.mobile)} value={patient.mobile} onChange={event => updatePatient('mobile', event.target.value)}/></div>{fieldErrors.mobile && <small className="field-error">{fieldErrors.mobile}</small>}</FormField>
         <FormField label="UHID"><input aria-label="UHID" value={patient.uhid || ''} readOnly placeholder="Generated for a new patient"/></FormField>
         <FormField label="Patient full name" required wide><input id="op-name" className={fieldErrors.name ? 'invalid' : ''} aria-label="Patient full name" aria-invalid={Boolean(fieldErrors.name)} value={patient.name} onChange={event => updatePatient('name', event.target.value)}/>{fieldErrors.name && <small className="field-error">{fieldErrors.name}</small>}</FormField>
-        <FormField label="Date of birth" required compact><input id="op-dateOfBirth" className={fieldErrors.dateOfBirth ? 'invalid' : ''} aria-label="Date of birth" aria-invalid={Boolean(fieldErrors.dateOfBirth)} type="date" value={patient.dateOfBirth} max={today()} onChange={event => updatePatient('dateOfBirth', event.target.value)}/>{fieldErrors.dateOfBirth && <small className="field-error">{fieldErrors.dateOfBirth}</small>}</FormField>
-        <FormField label="Age / Gender" required compact><div className={`split-input ${fieldErrors.gender ? 'invalid' : ''}`}><input aria-label="Age" value={age} readOnly/><select id="op-gender" aria-label="Gender" aria-invalid={Boolean(fieldErrors.gender)} value={patient.gender} onChange={event => updatePatient('gender', event.target.value)}><option value="" disabled>Select</option><option value="MALE">Male</option><option value="FEMALE">Female</option><option value="OTHER">Other</option></select></div>{fieldErrors.gender && <small className="field-error">{fieldErrors.gender}</small>}</FormField>
+        <FormField label="Age" required compact><input id="op-age" className={fieldErrors.age ? 'invalid' : ''} aria-label="Age" aria-invalid={Boolean(fieldErrors.age)} type="number" min="0" max="130" step="1" value={patient.age} onChange={event => updatePatient('age', event.target.value)} placeholder="Enter age in years"/>{fieldErrors.age && <small className="field-error">{fieldErrors.age}</small>}</FormField>
+        <FormField label="Gender" required compact><select id="op-gender" className={fieldErrors.gender ? 'invalid' : ''} aria-label="Gender" aria-invalid={Boolean(fieldErrors.gender)} value={patient.gender} onChange={event => updatePatient('gender', event.target.value)}><option value="" disabled>Select gender</option><option value="MALE">Male</option><option value="FEMALE">Female</option><option value="OTHER">Other</option></select>{fieldErrors.gender && <small className="field-error">{fieldErrors.gender}</small>}</FormField>
         <FormField label="Address" wide><input aria-label="Address" value={patient.address || ''} onChange={event => updatePatient('address', event.target.value)}/></FormField>
       </div>
       <div className="divider"/><SectionTitle step="02" title="Visit details" description="Assign doctor and consultation type"/>
@@ -149,9 +152,10 @@ export function OPBilling({ selectedPatient }) {
   </div><OPPrintReceipt patient={patient} age={age} visit={visit} doctor={selectedDoctor} consultation={consultation} discount={discount} total={total} paymentMode={paymentMode}/></>;
 }
 
-function OPPrintReceipt({ patient, age, visit, doctor, consultation, discount, total, paymentMode }) {
+export function OPPrintReceipt({ patient, age, visit, doctor, consultation, discount, total, paymentMode }) {
   const displayGender = patient.gender ? patient.gender[0] + patient.gender.slice(1).toLowerCase() : '—';
   const receiptDate = visit?.createdAt ? new Date(visit.createdAt).toLocaleString('en-IN') : new Date().toLocaleString('en-IN');
+  const validTill = opValidityDate(visit?.appointmentDate);
   const appointment = visit?.appointmentDate || visit?.appointmentTime
     ? `${visit?.appointmentDate || '—'} ${visit?.appointmentTime ? `at ${visit.appointmentTime}` : ''}`
     : '—';
@@ -174,8 +178,7 @@ function OPPrintReceipt({ patient, age, visit, doctor, consultation, discount, t
         <p><b>Department:</b> {visit?.doctor?.department || doctor?.department || '—'}</p>
         <p><b>Visit Type:</b> {(visit?.visitType || '').replaceAll('_', ' ') || '—'}</p>
         <p><b>Appointment:</b> {appointment}</p>
-        <p><b>Payment Mode:</b> {visit?.paymentMode || paymentMode}</p>
-        <p><b>Payment Status:</b> {(visit?.paymentStatus || 'PAID').replaceAll('_', ' ')}</p>
+        <p><b>Valid Till:</b> {validTill}</p>
       </div>
     </section>
     <table className="receipt-table"><thead><tr><th>S.No.</th><th>Particular</th><th>Mode</th><th>Amount (₹)</th></tr></thead><tbody>
@@ -184,6 +187,5 @@ function OPPrintReceipt({ patient, age, visit, doctor, consultation, discount, t
       <tr className="receipt-total"><td colSpan="3">Paid Amount</td><td>₹{Number(visit?.paidAmount ?? total).toFixed(2)}</td></tr>
     </tbody></table>
     <div className="receipt-paid-note">Received with thanks <b>{formatMoney(visit?.paidAmount ?? total)}</b> from <b>{patient.name || 'the patient'}</b>.</div>
-    <footer className="receipt-footer"><div><p>This is a computer-generated OPD payment receipt.</p><p>Please retain it for future hospital visits.</p></div><div className="signature">Authorized Signature</div></footer>
   </article>;
 }

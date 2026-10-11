@@ -13,6 +13,7 @@ export function Icon({ name, size = 18, className = '' }) {
     check: <path d="m5 12 4 4L19 6"/>,
     print: <><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></>,
     file: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></>,
+    download: <><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></>,
     trash: <><path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6"/><path d="M10 11v6M14 11v6"/></>,
     info: <><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></>,
     rupee: <><path d="M6 4h12M6 9h12M7 4c6 0 6 8 0 8l9 8"/></>,
